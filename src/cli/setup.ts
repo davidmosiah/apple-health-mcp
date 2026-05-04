@@ -37,10 +37,14 @@ export async function runSetupCommand(args: string[]): Promise<number> {
 
   if (options.json) console.log(JSON.stringify(output, null, 2));
   else {
-    console.log("Apple Health MCP setup saved.");
-    console.log(`Local config: ${configPath}`);
-    console.log(`MCP client config: ${clientConfig.path}`);
-    if (clientConfig.hermes_skill_path) console.log(`Hermes skill: ${clientConfig.hermes_skill_path}`);
+    console.log("Apple Health MCP · Setup");
+    console.log("");
+    console.log(`  ✓  Local config       ${configPath}`);
+    if (options.exportPath) console.log(`  ✓  Export path        ${options.exportPath}`);
+    console.log(`  ✓  MCP client config  ${clientConfig.path}`);
+    if (clientConfig.hermes_skill_path) console.log(`  ✓  Hermes skill       ${clientConfig.hermes_skill_path}`);
+    console.log("");
+    console.log(`→ Next: ${output.next_step}`);
   }
   return 0;
 }

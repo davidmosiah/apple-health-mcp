@@ -50,25 +50,35 @@ function parseDoctorOptions(args: string[]) {
 }
 
 function printDoctor(status: Awaited<ReturnType<typeof buildConnectionStatus>>): void {
-  console.log("Apple Health MCP Doctor");
-  console.log(`Status: ${status.ok ? "ready" : "needs export"}`);
+  const ok = "✓";
+  const fail = "✗";
+  const info = "·";
+  const check = (passed: boolean) => (passed ? ok : fail);
+  const line = (mark: string, label: string, detail?: string) => {
+    const labelCol = label.padEnd(28);
+    console.log(`  ${mark}  ${labelCol}${detail ? `  ${detail}` : ""}`);
+  };
+
+  console.log("Apple Health MCP · Doctor");
+  console.log(`Status: ${status.ok ? `READY ${ok}` : `NEEDS EXPORT ${fail}`}`);
   if (status.client) console.log(`Client: ${status.client}`);
   console.log("");
-  console.log("Checks:");
-  console.log(`- Node.js >=20: ${status.node.supported ? "ok" : `needs update (${status.node.version})`}`);
-  console.log(`- Export path: ${status.export.exists ? `${status.export.kind} at ${status.export.export_xml_path ?? status.export.resolved_path}` : "missing"}`);
-  console.log(`- Privacy mode: ${status.config.privacy_mode}`);
+  console.log("Checks");
+  line(check(status.node.supported), "Node.js >=20", status.node.supported ? undefined : `version ${status.node.version}`);
+  line(check(status.export.exists), "Export path", status.export.exists ? `${status.export.kind} at ${status.export.export_xml_path ?? status.export.resolved_path}` : "missing");
+  line(info, "Privacy mode", status.config.privacy_mode);
   if (status.client_checks?.hermes) {
     const hermes = status.client_checks.hermes;
-    console.log("- Hermes config:");
-    console.log(`  path: ${hermes.config_path}`);
-    console.log(`  configured: ${hermes.apple_health_server_configured ? "ok" : "missing"}`);
-    console.log(`  pinned package: ${hermes.package_pinned ? "ok" : "missing"}`);
-    console.log(`  skill: ${hermes.skill_installed ? hermes.skill_path : "missing"}`);
+    console.log("");
+    console.log("Hermes");
+    line(info, "config path", hermes.config_path);
+    line(check(hermes.apple_health_server_configured), "configured");
+    line(check(hermes.package_pinned), "pinned package");
+    line(check(hermes.skill_installed), "skill", hermes.skill_installed ? hermes.skill_path : "missing");
   }
   console.log("");
-  console.log("Next steps:");
-  status.next_steps.forEach((step, index) => console.log(`${index + 1}. ${step}`));
+  console.log("Next steps");
+  status.next_steps.forEach((step, index) => console.log(`  ${index + 1}. ${step}`));
 }
 
 function printHelp(): void {

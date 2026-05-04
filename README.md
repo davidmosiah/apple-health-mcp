@@ -1,60 +1,51 @@
 # apple-health-mcp-server
 
-[![MCP Compatible](https://img.shields.io/badge/MCP-compatible-7C3AED?style=flat-square)](https://modelcontextprotocol.io)
+[![MCP Compatible](https://img.shields.io/badge/MCP-compatible-7C3AED?style=flat-square&logo=anthropic&logoColor=white)](https://modelcontextprotocol.io)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green?style=flat-square)](https://opensource.org/licenses/MIT)
+[![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?style=flat-square&logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
+[![Provider: Apple Health](https://img.shields.io/badge/data-Apple%20Health-FF2D55?style=flat-square&logo=apple&logoColor=white)](https://www.apple.com/health/)
+[![npm version](https://img.shields.io/npm/v/apple-health-mcp-unofficial?style=flat-square&color=cb3837&logo=npm)](https://www.npmjs.com/package/apple-health-mcp-unofficial)
+[![Delx Wellness](https://img.shields.io/badge/part%20of-Delx%20Wellness-0ea5a3?style=flat-square)](https://github.com/davidmosiah/delx-wellness)
 
-Unofficial local-first MCP server for Apple Health export data.
+**Local-first MCP server that reads your Apple Health export and exposes it to AI agents.**
 
-Delx Wellness registry: <https://github.com/davidmosiah/delx-wellness>
+> **Unofficial project.** Not affiliated with, endorsed by or supported by Apple Inc. Apple Health is a trademark of Apple Inc. This package reads exports you generate yourself from the Apple Health app.
 
-> This connector reads Apple Health export files such as `export.xml` or `export.zip`. It does not provide live HealthKit access. A native iOS HealthKit bridge is a separate future component.
+> **No live HealthKit access.** This connector reads `export.xml` / `export.zip` files exported from your iPhone. A native iOS HealthKit bridge is a separate future component.
 
-## What It Does
+Built by [David Mosiah](https://github.com/davidmosiah) for people who use Claude, Cursor, Hermes, OpenClaw or other MCP-compatible agents to think about long-term health and activity trends — without copy-pasting numbers from the Health app.
 
-- Reads local Apple Health `export.xml`, export directories, or `export.zip`.
-- Lists bounded Apple Health records by type/date.
-- Lists workouts.
-- Builds daily and weekly summaries for activity, heart, sleep and workouts.
-- Exposes an agent manifest for Hermes/OpenClaw-style runtimes.
-- Keeps health exports local; agents should never ask users to paste raw exports into chat.
+Part of [Delx Wellness](https://github.com/davidmosiah/delx-wellness), a registry of local-first wellness MCP connectors.
 
-## Install
+## Why this exists
 
-```bash
-npx -y apple-health-mcp-unofficial doctor
+Apple Health is the most complete personal health dataset most people own — years of activity, heart rate, sleep, workouts, body measurements, even ECGs. But Apple does not expose a public cloud API. The data lives on the iPhone behind HealthKit, and the only practical way to bring it off-device today is the **Health Export** feature inside the Health app.
+
+This package reads that export locally — either the raw `export.xml`, the unzipped folder, or the `export.zip` — and exposes Apple Health through the Model Context Protocol. No tokens, no OAuth, no cloud sync. The export never leaves your machine.
+
+## Setup in 60 seconds
+
+**1. Export your Apple Health data on iPhone:**
+
+```text
+Health app → tap your profile picture → Export All Health Data
 ```
 
-For MCP clients, use the package with no subcommand so it starts the MCP stdio server.
+Wait a few minutes. AirDrop or transfer the zip to this machine.
 
-## Export Apple Health Data
-
-On iPhone:
-
-1. Open Health.
-2. Tap your profile picture.
-3. Tap Export All Health Data.
-4. Transfer the exported zip to this machine.
-
-Then configure:
+**2. Configure and verify:**
 
 ```bash
 npx -y apple-health-mcp-unofficial setup --export-path /path/to/export.zip
 npx -y apple-health-mcp-unofficial doctor
 ```
 
-Supported paths:
-
-- `/path/to/export.xml`
-- `/path/to/apple_health_export/`
+Supported export paths:
 - `/path/to/export.zip`
+- `/path/to/apple_health_export/` (unzipped folder)
+- `/path/to/export.xml` (raw export file)
 
-Environment variable alternative:
-
-```bash
-export APPLE_HEALTH_EXPORT_PATH="/path/to/export.xml"
-```
-
-## MCP Client Config
+Then add this to your MCP client config:
 
 ```json
 {
@@ -67,51 +58,118 @@ export APPLE_HEALTH_EXPORT_PATH="/path/to/export.xml"
 }
 ```
 
-Hermes:
+For Claude Desktop, run `setup --client claude --export-path /path/to/export.zip` and the snippet is written for you.
 
-```bash
-npx -y apple-health-mcp-unofficial setup --client hermes --export-path /path/to/export.zip
-apple-health-mcp-server doctor --client hermes
+## Try it with your agent
+
+Three things to ask first:
+
+```text
+Use apple_health_connection_status to check setup, then run apple_health_daily_summary.
+Give me a 5-line wellness brief for today.
 ```
 
-Then reload MCP with `/reload-mcp` or `hermes mcp test apple_health`.
+```text
+Call apple_health_weekly_summary with response_format=json. Compare steps,
+sleep, workouts and heart signals across the last 7 days.
+```
+
+```text
+Use the apple_health_weekly_review prompt, days=14.
+Find the biggest habit pattern and suggest one experiment.
+```
+
+## Data availability
+
+This package parses Apple Health exports from the Health app. When this README says `raw`, it means the upstream XML record fields — not raw HealthKit data.
+
+| Data | Available | Notes |
+|---|:---:|---|
+| Activity (steps, distance, energy, exercise) | ✓ | Standard `HKQuantityType` records |
+| Heart rate (resting + samples) | ✓ | Recorded HR samples and resting HR |
+| Sleep analysis + sleep stages | ✓ | When iPhone/Watch logs sleep |
+| Workouts + sport metadata | ✓ | All `HKWorkout` entries |
+| Body measurements (weight, BMI, body fat) | ✓ | When the user logs them |
+| HRV (SDNN) + breathing rate | ✓ | When Watch supports them |
+| ECG records | ✓ (metadata) | Apple Watch ECG events; raw waveform requires PDF export |
+| Live HealthKit access | — | Apple does not expose a public live API |
+| iCloud Health sync | — | Not exposed by export files |
 
 ## Tools
 
-- `apple_health_agent_manifest`
-- `apple_health_capabilities`
-- `apple_health_connection_status`
-- `apple_health_privacy_audit`
-- `apple_health_list_records`
-- `apple_health_list_workouts`
-- `apple_health_daily_summary`
-- `apple_health_weekly_summary`
+**Start with these:**
+
+- `apple_health_connection_status` — verify export path before reading data
+- `apple_health_daily_summary` — daily wellness brief from export data
+- `apple_health_weekly_summary` — weekly comparison and habit signals
+
+**Diagnostics**
+
+- `apple_health_capabilities`, `apple_health_agent_manifest`, `apple_health_privacy_audit`
+
+**Records**
+
+- `apple_health_list_records` — bounded records by `type` (e.g. `HKQuantityTypeIdentifierStepCount`), `start`, `end`, `limit`
+- `apple_health_list_workouts` — bounded workout records
+
+## Prompts
+
+- `apple_health_daily_review` — daily wellness review with non-medical framing
+- `apple_health_weekly_review` — weekly habit signals and trend comparison
 
 ## Resources
 
-- `apple-health://agent-manifest`
-- `apple-health://capabilities`
-- `apple-health://summary/daily`
-- `apple-health://summary/weekly`
+- `apple-health://capabilities`, `apple-health://agent-manifest`
+- `apple-health://summary/daily`, `apple-health://summary/weekly`
 
-## Privacy
+## Privacy & security
 
-Apple Health exports are sensitive health data. Keep them local. Do not commit them, upload them to issues, or paste raw export XML into chat.
+- Apple Health exports are highly sensitive personal health data. Keep them local.
+- Never commit `export.xml` / `export.zip` to GitHub, paste raw exports into chat, or upload them to issues.
+- The export path is read-only; the MCP never modifies your export.
+- `APPLE_HEALTH_PRIVACY_MODE` defaults to `summary` for this connector (more conservative than other Delx Wellness connectors) since the dataset is rich and sensitive. Raw record dumps are opt-in.
+- This is **not medical advice**. The server exposes data you exported yourself for personal AI workflows, not diagnosis or emergency monitoring.
 
-This project is not a medical device and does not provide diagnosis, treatment or emergency monitoring.
+## Configuration
+
+```bash
+APPLE_HEALTH_EXPORT_PATH=/path/to/export.zip   # or export.xml or apple_health_export/
+APPLE_HEALTH_PRIVACY_MODE=summary              # summary | structured | raw
+```
+
+`setup` writes both into `~/.apple-health-mcp/config.json` with `0600` permissions.
+
+## Hermes / remote setup
+
+```bash
+npx -y apple-health-mcp-unofficial setup --client hermes --export-path /path/to/export.zip
+npx -y apple-health-mcp-unofficial doctor --client hermes
+hermes mcp test apple_health
+```
+
+After Hermes config changes, use `/reload-mcp` or `hermes mcp test apple_health`. Don't restart the gateway for normal export access.
+
+If the Hermes server runs on a different machine than your iPhone, transfer the export there and point `--export-path` at it. The export file should be `chmod 600`.
+
+## Requirements
+
+- Node.js 20+
+- An Apple Health export from your iPhone (Health app → profile → Export All Health Data)
 
 ## Development
 
 ```bash
+git clone https://github.com/davidmosiah/apple-health-mcp.git
+cd apple-health-mcp
 npm install
 npm test
+npm run build
 ```
 
-Run locally:
+Test with MCP Inspector:
 
 ```bash
-npm run build
-node dist/index.js
+npx @modelcontextprotocol/inspector node dist/index.js
 ```
 
 Optional local HTTP transport:
@@ -120,3 +178,19 @@ Optional local HTTP transport:
 APPLE_HEALTH_MCP_TRANSPORT=http APPLE_HEALTH_MCP_PORT=3000 node dist/index.js
 curl http://127.0.0.1:3000/health
 ```
+
+## Links
+
+- npm: <https://www.npmjs.com/package/apple-health-mcp-unofficial>
+- GitHub: <https://github.com/davidmosiah/apple-health-mcp>
+- Delx Wellness registry: <https://github.com/davidmosiah/delx-wellness>
+- Connector quality standard: <https://github.com/davidmosiah/delx-wellness/blob/main/docs/connector-quality-standard.md>
+- Apple Health export how-to: <https://support.apple.com/guide/iphone/share-health-and-fitness-data-iph27f6325b2/ios>
+
+## License
+
+MIT — see [LICENSE](LICENSE).
+
+## Disclaimer
+
+This software is provided as-is. It is not a medical device, does not provide medical advice, and should not be used for diagnosis, treatment or emergency monitoring. Always consult qualified professionals for medical concerns.
