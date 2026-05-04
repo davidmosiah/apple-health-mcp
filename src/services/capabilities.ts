@@ -24,7 +24,7 @@ export function buildCapabilities() {
     supported_data: [
       { name: "Activity", examples: ["steps", "distance", "active energy"], tools: ["apple_health_list_records", "apple_health_daily_summary"] },
       { name: "Heart", examples: ["heart rate", "resting heart rate", "HRV SDNN"], tools: ["apple_health_list_records", "apple_health_daily_summary"] },
-      { name: "Sleep", examples: ["sleep analysis categories and durations"], tools: ["apple_health_list_records", "apple_health_daily_summary"] },
+      { name: "Sleep", examples: ["sleep analysis categories and durations"], tools: ["apple_health_list_records", "apple_health_daily_summary", "apple_health_wellness_context"] },
       { name: "Workouts", examples: ["activity type", "duration", "distance", "energy"], tools: ["apple_health_list_workouts", "apple_health_weekly_summary"] }
     ],
     supported_record_types: SUPPORTED_RECORD_TYPES,
@@ -32,6 +32,7 @@ export function buildCapabilities() {
       "Call apple_health_agent_manifest when installing or operating inside an agent runtime.",
       "Call apple_health_connection_status before reading export data.",
       "Use apple_health_daily_summary or apple_health_weekly_summary before low-level record calls.",
+      "Use apple_health_wellness_context when handing export-derived sleep/activity context to Exercise Catalog.",
       "Do not ask users to paste raw export.xml content into chat.",
       "Do not claim live HealthKit access; this connector reads local Apple Health exports."
     ],

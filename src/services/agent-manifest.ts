@@ -8,6 +8,7 @@ export const HERMES_DIRECT_TOOLS = [
   "mcp_apple_health_apple_health_connection_status",
   "mcp_apple_health_apple_health_daily_summary",
   "mcp_apple_health_apple_health_weekly_summary",
+  "mcp_apple_health_apple_health_wellness_context",
   "mcp_apple_health_apple_health_list_records",
   "mcp_apple_health_apple_health_list_workouts"
 ];
@@ -20,6 +21,7 @@ const STANDARD_TOOLS = [
   "apple_health_list_workouts",
   "apple_health_daily_summary",
   "apple_health_weekly_summary",
+  "apple_health_wellness_context",
   "apple_health_privacy_audit"
 ];
 
@@ -48,7 +50,7 @@ export function buildAgentManifest(client: AgentClientName = "generic") {
       local_config: "~/.apple-health-mcp/config.json",
       supported_record_types: SUPPORTED_RECORD_TYPES
     },
-    recommended_first_calls: ["apple_health_connection_status", "apple_health_daily_summary", "apple_health_weekly_summary"],
+    recommended_first_calls: ["apple_health_connection_status", "apple_health_wellness_context", "apple_health_daily_summary", "apple_health_weekly_summary"],
     standard_tools: STANDARD_TOOLS,
     resources: ["apple-health://agent-manifest", "apple-health://capabilities", "apple-health://summary/daily", "apple-health://summary/weekly"],
     hermes: {
@@ -114,7 +116,7 @@ ${manifest.agent_rules.map((rule) => `- ${rule}`).join("\n")}
 }
 
 export function hermesConfigSnippet(): string {
-  return `mcp_servers:\n  apple_health:\n    command: npx\n    args:\n      - -y\n      - ${PINNED_NPM_PACKAGE}`;
+  return `mcp_servers:\n  apple_health:\n    command: npx\n    args:\n      - -y\n      - ${PINNED_NPM_PACKAGE}\n    timeout: 120\n    connect_timeout: 60\n    sampling:\n      enabled: false`;
 }
 
 export function hermesSkillMarkdown(): string {

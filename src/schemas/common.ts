@@ -42,6 +42,14 @@ export const DailySummaryInputSchema = z.object({
   response_format: ResponseFormatSchema
 }).strict();
 
+export const WellnessContextInputSchema = z.object({
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().describe("YYYY-MM-DD date. Defaults to today in UTC."),
+  soreness: z.array(z.string().min(1).max(80)).default([]),
+  injury_flags: z.array(z.string().min(1).max(120)).default([]),
+  notes: z.string().max(500).optional(),
+  response_format: ResponseFormatSchema
+}).strict();
+
 export const WeeklySummaryInputSchema = z.object({
   end_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().describe("YYYY-MM-DD end date. Defaults to today in UTC."),
   days: z.number().int().min(1).max(30).default(7),
@@ -54,4 +62,5 @@ export type AgentManifestInput = z.infer<typeof AgentManifestInputSchema>;
 export type RecordListInput = z.infer<typeof RecordListInputSchema>;
 export type WorkoutListInput = z.infer<typeof WorkoutListInputSchema>;
 export type DailySummaryInput = z.infer<typeof DailySummaryInputSchema>;
+export type WellnessContextInput = z.infer<typeof WellnessContextInputSchema>;
 export type WeeklySummaryInput = z.infer<typeof WeeklySummaryInputSchema>;

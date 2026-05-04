@@ -5,6 +5,7 @@ import {
   DailySummaryInputSchema,
   RecordListInputSchema,
   ResponseOnlyInputSchema,
+  WellnessContextInputSchema,
   WeeklySummaryInputSchema,
   WorkoutListInputSchema
 } from "../schemas/common.js";
@@ -16,6 +17,7 @@ import { buildConnectionStatus } from "../services/connection-status.js";
 import { listRecords, listWorkouts } from "../services/apple-health-export.js";
 import { bulletList, makeError, makeResponse } from "../services/format.js";
 import { buildDailySummary, buildWeeklySummary, formatSummaryMarkdown } from "../services/summary.js";
+import { buildWellnessContext, formatWellnessContextMarkdown } from "../services/context.js";
 
 export function registerAppleHealthTools(server: McpServer): void {
   server.registerTool("apple_health_agent_manifest", {
@@ -128,6 +130,20 @@ export function registerAppleHealthTools(server: McpServer): void {
     try {
       const summary = await buildDailySummary(getConfig().exportPath, date);
       return makeResponse(summary, response_format, formatSummaryMarkdown(summary));
+    } catch (error) {
+      return makeError((error as Error).message);
+    }
+  });
+
+  server.registerTool("apple_health_wellness_context", {
+    title: "Apple Health Wellness Context",
+    description: "Normalize local Apple Health export sleep, workout and activity data into the shared wellness_context shape for recommendation engines.",
+    inputSchema: WellnessContextInputSchema.shape,
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true }
+  }, async ({ date, soreness, injury_flags, notes, response_format }) => {
+    try {
+      const context = await buildWellnessContext(getConfig().exportPath, { date, soreness, injury_flags, notes });
+      return makeResponse(context, response_format, formatWellnessContextMarkdown(context));
     } catch (error) {
       return makeError((error as Error).message);
     }

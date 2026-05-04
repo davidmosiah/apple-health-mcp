@@ -47,6 +47,14 @@ try {
   assert.equal(weekly.structuredContent?.days, 2);
   assert.equal(weekly.structuredContent?.totals?.steps, 5000);
 
+  const context = await client.callTool({
+    name: 'apple_health_wellness_context',
+    arguments: { date: '2026-05-01', response_format: 'json' }
+  });
+  assert.equal(context.structuredContent?.source, 'apple_health');
+  assert.equal(context.structuredContent?.sleep_score, 100);
+  assert.equal(context.structuredContent?.recent_training_load, 'normal');
+
   console.log(JSON.stringify({ ok: true, export_parser: true, daily_steps: daily.structuredContent?.totals?.steps }, null, 2));
 } finally {
   await client.close();
