@@ -1,0 +1,27 @@
+import { REDACTED_KEY_PATTERNS } from "./redaction.js";
+import { getConfig } from "./config.js";
+import { localConfigPath } from "./local-config.js";
+
+export function buildPrivacyAudit() {
+  const config = getConfig();
+  return {
+    project: "apple-health-mcp-unofficial",
+    unofficial: true,
+    local_first: true,
+    data_source: "User-provided Apple Health export file",
+    live_healthkit_access: false,
+    local_config_path: localConfigPath(),
+    export_path_configured: Boolean(config.exportPath),
+    privacy_mode_default: config.privacyMode,
+    raw_export_opt_in: config.privacyMode === "raw",
+    stdout_safe: true,
+    secret_env_vars: [],
+    sensitive_env_vars: ["APPLE_HEALTH_EXPORT_PATH"],
+    redacted_key_patterns: REDACTED_KEY_PATTERNS,
+    notes: [
+      "Apple Health exports can contain sensitive health data and should stay local.",
+      "Tools return bounded structured records and summaries; do not paste export.xml into chat.",
+      "This connector is not a medical device and does not provide diagnosis or treatment."
+    ]
+  };
+}

@@ -1,0 +1,10 @@
+src/
+scripts/
+fixtures/
+.github/
+.DS_Store
+.env
+export.xml
+export.zip
+apple_health_export/
+*.log

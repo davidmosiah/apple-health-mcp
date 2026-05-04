@@ -1,0 +1,28 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-07-09/server.schema.json",
+  "name": "io.github.davidmosiah/apple-health-mcp",
+  "description": "Unofficial local-first MCP server for Apple Health export data.",
+  "status": "active",
+  "repository": {
+    "url": "https://github.com/davidmosiah/apple-health-mcp",
+    "source": "github"
+  },
+  "version": "0.1.0",
+  "packages": [
+    {
+      "registry_name": "npm",
+      "name": "apple-health-mcp-unofficial",
+      "version": "0.1.0",
+      "package_arguments": [],
+      "environment_variables": [
+        {
+          "name": "APPLE_HEALTH_EXPORT_PATH",
+          "description": "Path to export.xml, an Apple Health export directory, or export.zip.",
+          "is_required": false,
+          "is_secret": false
+        }
+      ]
+    }
+  ],
+  "remotes": []
+}

@@ -1,0 +1,177 @@
+import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { dirname, join } from "node:path";
+import { NPM_PACKAGE_NAME, PINNED_NPM_PACKAGE } from "../constants.js";
+import { hermesConfigSnippet, hermesSkillMarkdown, parseAgentClientName, type AgentClientName } from "../services/agent-manifest.js";
+import { writeLocalConfig } from "../services/local-config.js";
+import { parsePrivacyMode } from "../services/config.js";
+
+interface SetupOptions {
+  client: AgentClientName;
+  exportPath?: string;
+  privacyMode: "summary" | "structured" | "raw";
+  json: boolean;
+  homeDir: string;
+}
+
+export async function runSetupCommand(args: string[]): Promise<number> {
+  const options = parseSetupOptions(args);
+  const configPath = writeLocalConfig({
+    APPLE_HEALTH_EXPORT_PATH: options.exportPath,
+    APPLE_HEALTH_PRIVACY_MODE: options.privacyMode
+  }, options.homeDir);
+  const clientConfig = writeClientConfig(options.client, options.homeDir);
+  const output = {
+    ok: true,
+    config_path: configPath,
+    client: options.client,
+    export_path: options.exportPath,
+    client_config_path: clientConfig.path,
+    hermes_skill_path: clientConfig.hermes_skill_path,
+    hermes_config_backup_path: clientConfig.hermes_config_backup_path,
+    warnings: clientConfig.warnings,
+    next_step: options.client === "hermes"
+      ? "Run `apple-health-mcp-server doctor --client hermes`, then use `/reload-mcp` or `hermes mcp test apple_health`."
+      : "Run `apple-health-mcp-server doctor`."
+  };
+
+  if (options.json) console.log(JSON.stringify(output, null, 2));
+  else {
+    console.log("Apple Health MCP setup saved.");
+    console.log(`Local config: ${configPath}`);
+    console.log(`MCP client config: ${clientConfig.path}`);
+    if (clientConfig.hermes_skill_path) console.log(`Hermes skill: ${clientConfig.hermes_skill_path}`);
+  }
+  return 0;
+}
+
+function parseSetupOptions(args: string[]): SetupOptions {
+  const flags = parseFlags(args);
+  return {
+    client: parseAgentClientName(flags.get("client")),
+    exportPath: flags.get("export-path"),
+    privacyMode: parsePrivacyMode(flags.get("privacy-mode")) as "summary" | "structured" | "raw",
+    json: flags.has("json"),
+    homeDir: flags.get("home-dir") ?? homedir()
+  };
+}
+
+function parseFlags(args: string[]): Map<string, string> {
+  const flags = new Map<string, string>();
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+    if (!arg.startsWith("--")) continue;
+    const name = arg.slice(2);
+    const next = args[index + 1];
+    if (!next || next.startsWith("--")) flags.set(name, "true");
+    else {
+      flags.set(name, next);
+      index += 1;
+    }
+  }
+  return flags;
+}
+
+interface ClientConfigResult {
+  path: string;
+  hermes_skill_path?: string;
+  hermes_config_backup_path?: string;
+  warnings?: string[];
+}
+
+function writeClientConfig(client: AgentClientName, homeDir: string): ClientConfigResult {
+  if (client === "hermes") return writeHermesClientConfig(homeDir);
+  const path = client === "claude"
+    ? join(homeDir, "Library", "Application Support", "Claude", "claude_desktop_config.json")
+    : join(homeDir, ".apple-health-mcp", "mcp-configs", `${client}.json`);
+  mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+  writeFileSync(path, `${JSON.stringify(mcpConfigSnippet(), null, 2)}\n`, { mode: 0o600 });
+  chmodSync(path, 0o600);
+  return { path };
+}
+
+function mcpConfigSnippet() {
+  return {
+    mcpServers: {
+      apple_health: {
+        command: "npx",
+        args: ["-y", NPM_PACKAGE_NAME]
+      }
+    }
+  };
+}
+
+function writeHermesClientConfig(homeDir: string): ClientConfigResult {
+  const configPath = join(homeDir, ".hermes", "config.yaml");
+  const skillPath = join(homeDir, ".hermes", "skills", "apple-health-mcp", "SKILL.md");
+  mkdirSync(dirname(configPath), { recursive: true, mode: 0o700 });
+  mkdirSync(dirname(skillPath), { recursive: true, mode: 0o700 });
+
+  const backupPath = mergeHermesConfig(configPath);
+  writeFileSync(skillPath, `${hermesSkillMarkdown()}\n`, { mode: 0o600 });
+  chmodSync(skillPath, 0o600);
+  return {
+    path: configPath,
+    hermes_skill_path: skillPath,
+    hermes_config_backup_path: backupPath,
+    warnings: [
+      "After editing Hermes MCP config, use `/reload-mcp` or `hermes mcp test apple_health`; do not restart the Hermes gateway for normal Apple Health export access.",
+      `Hermes config pins ${PINNED_NPM_PACKAGE} to avoid stale npx cache behavior.`
+    ]
+  };
+}
+
+function mergeHermesConfig(configPath: string): string | undefined {
+  const snippet = hermesConfigSnippet();
+  if (!existsSync(configPath)) {
+    writeFileSync(configPath, `${snippet}\n`, { mode: 0o600 });
+    chmodSync(configPath, 0o600);
+    return undefined;
+  }
+
+  const existing = readFileSync(configPath, "utf8");
+  if (/apple-health-mcp-unofficial|apple-health-mcp-server|apple-health-mcp/.test(existing) && /^\s*apple_health\s*:/m.test(existing)) {
+    if (existing.includes(PINNED_NPM_PACKAGE)) return undefined;
+    const backupPath = backupConfig(configPath);
+    const updated = existing.replace(/apple-health-mcp-unofficial(?:@\d+\.\d+\.\d+)?/g, PINNED_NPM_PACKAGE);
+    writeFileSync(configPath, ensureReloadHint(updated), { mode: 0o600 });
+    chmodSync(configPath, 0o600);
+    return backupPath;
+  }
+
+  const backupPath = backupConfig(configPath);
+  const next = existing.trimEnd().length ? addHermesBlock(existing) : snippet;
+  writeFileSync(configPath, ensureReloadHint(next), { mode: 0o600 });
+  chmodSync(configPath, 0o600);
+  return backupPath;
+}
+
+function addHermesBlock(existing: string): string {
+  const serverBlock = [
+    "  apple_health:",
+    "    command: npx",
+    "    args:",
+    "      - -y",
+    `      - ${PINNED_NPM_PACKAGE}`
+  ].join("\n");
+  const trimmed = existing.trimEnd();
+  if (/^mcp_servers:\s*$/m.test(trimmed)) {
+    return `${trimmed.replace(/^mcp_servers:\s*$/m, `mcp_servers:\n${serverBlock}`)}\n`;
+  }
+  return `${trimmed}\n\n# Added by ${NPM_PACKAGE_NAME} setup.\nmcp_servers:\n${serverBlock}\n`;
+}
+
+function backupConfig(path: string): string {
+  const backupPath = `${path}.bak-apple-health-mcp-${new Date().toISOString().replace(/[-:]/g, "").replace(/\..+/, "Z")}`;
+  renameSync(path, backupPath);
+  chmodSync(backupPath, 0o600);
+  writeFileSync(path, readFileSync(backupPath, "utf8"), { mode: 0o600 });
+  chmodSync(path, 0o600);
+  return backupPath;
+}
+
+function ensureReloadHint(text: string): string {
+  if (/mcp_reload_confirm\s*:\s*false/.test(text)) return text.endsWith("\n") ? text : `${text}\n`;
+  if (/^approvals:\s*$/m.test(text)) return `${text.trimEnd()}\n  mcp_reload_confirm: false\n`;
+  return `${text.trimEnd()}\n\napprovals:\n  mcp_reload_confirm: false\n`;
+}

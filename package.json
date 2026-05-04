@@ -1,0 +1,78 @@
+{
+  "name": "apple-health-mcp-unofficial",
+  "version": "0.1.0",
+  "description": "Unofficial local-first MCP server for Apple Health export data.",
+  "type": "module",
+  "bin": {
+    "apple-health-mcp-unofficial": "dist/index.js",
+    "apple-health-mcp-server": "dist/index.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE",
+    "SECURITY.md",
+    "server.json",
+    "docs",
+    "examples"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "start": "node dist/index.js",
+    "dev": "tsx src/index.ts",
+    "smoke": "node scripts/smoke-tools.mjs",
+    "test": "npm run typecheck && npm run build && npm run smoke && npm run test:export && npm run smoke:http && npm run test:cli-ux && npm run test:hermes-agent",
+    "test:export": "node scripts/export-parser-test.mjs",
+    "test:cli-ux": "node scripts/cli-ux-test.mjs",
+    "test:hermes-agent": "node scripts/hermes-agent-manifest-test.mjs",
+    "smoke:http": "node scripts/smoke-http.mjs",
+    "prepublishOnly": "npm test"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "apple-health",
+    "healthkit",
+    "wearable",
+    "health",
+    "fitness",
+    "ai-agents"
+  ],
+  "author": "David Mosiah",
+  "license": "MIT",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.21.0",
+    "cors": "^2.8.6",
+    "express": "^5.2.1",
+    "sax": "^1.4.3",
+    "yauzl": "^3.2.0",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.6",
+    "@types/node": "^25.6.0",
+    "@types/sax": "^1.2.7",
+    "@types/yauzl": "^2.10.3",
+    "tsx": "^4.20.6",
+    "typescript": "^6.0.3"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/davidmosiah/apple-health-mcp.git"
+  },
+  "bugs": {
+    "url": "https://github.com/davidmosiah/apple-health-mcp/issues"
+  },
+  "homepage": "https://github.com/davidmosiah/apple-health-mcp",
+  "mcpName": "io.github.davidmosiah/apple-health-mcp",
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "main": "dist/index.js"
+}
