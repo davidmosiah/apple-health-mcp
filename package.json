@@ -69,7 +69,7 @@
   "bugs": {
     "url": "https://github.com/davidmosiah/apple-health-mcp/issues"
   },
-  "homepage": "https://github.com/davidmosiah/apple-health-mcp",
+  "homepage": "https://wellness.delx.ai/connectors/apple-health",
   "mcpName": "io.github.davidmosiah/apple-health-mcp",
   "publishConfig": {
     "access": "public",

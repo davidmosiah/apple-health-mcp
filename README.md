@@ -182,6 +182,7 @@ curl http://127.0.0.1:3000/health
 ## Links
 
 - npm: <https://www.npmjs.com/package/apple-health-mcp-unofficial>
+- Docs site: <https://wellness.delx.ai/connectors/apple-health>
 - GitHub: <https://github.com/davidmosiah/apple-health-mcp>
 - Delx Wellness registry: <https://github.com/davidmosiah/delx-wellness>
 - Connector quality standard: <https://github.com/davidmosiah/delx-wellness/blob/main/docs/connector-quality-standard.md>
