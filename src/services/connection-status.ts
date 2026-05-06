@@ -26,7 +26,10 @@ export async function buildConnectionStatus(options: { client?: AgentClientName;
     config: {
       path: localConfigPath(homeDir),
       export_path: config.exportPath,
-      privacy_mode: config.privacyMode
+      privacy_mode: config.privacyMode,
+      timezone: config.timezone,
+      last_import_at: config.lastImportAt,
+      last_import_source_path: config.lastImportSourcePath
     },
     export: location,
     client_checks: clientChecks,
@@ -88,6 +91,7 @@ function buildNextSteps(input: { nodeSupported: boolean; location: Awaited<Retur
   if (!input.nodeSupported) steps.push("Install Node.js 20 or newer.");
   if (!input.location.exists) {
     steps.push("Set APPLE_HEALTH_EXPORT_PATH to export.xml, an Apple Health export directory, or export.zip.");
+    steps.push("For lower-friction local setup, run `apple-health-mcp-server setup --auto-import` after transferring export.zip to Downloads, Desktop or Documents.");
     steps.push("On iPhone: Health app > profile picture > Export All Health Data, then transfer the export to this machine.");
   }
   if (steps.length === 0) steps.push("Ready. Start with apple_health_daily_summary or apple_health_weekly_summary.");

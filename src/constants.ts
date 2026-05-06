@@ -1,5 +1,5 @@
 export const SERVER_NAME = "apple-health-mcp-server";
-export const SERVER_VERSION = "0.2.0";
+export const SERVER_VERSION = "0.2.1";
 export const NPM_PACKAGE_NAME = "apple-health-mcp-unofficial";
 export const PINNED_NPM_PACKAGE = `${NPM_PACKAGE_NAME}@${SERVER_VERSION}`;
 
@@ -16,6 +16,8 @@ export const SUPPORTED_RECORD_TYPES = [
   "HKQuantityTypeIdentifierRespiratoryRate",
   "HKQuantityTypeIdentifierOxygenSaturation",
   "HKQuantityTypeIdentifierBodyMass",
+  "HKQuantityTypeIdentifierBodyMassIndex",
+  "HKQuantityTypeIdentifierBodyFatPercentage",
   "HKCategoryTypeIdentifierSleepAnalysis",
   "HKCategoryTypeIdentifierMindfulSession"
 ];

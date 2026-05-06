@@ -1,78 +1,93 @@
-import type { AppleHealthRecord } from "../types.js";
-import { dayBounds, listRecords, listWorkouts, parseAppleDate } from "./apple-health-export.js";
+import type { AppleHealthRecord, AppleHealthWorkout } from "../types.js";
+import { getExportSnapshot, parseAppleDate, recordOverlaps } from "./apple-health-export.js";
+import { addCalendarDays, dayBounds, todayIsoDate } from "./time.js";
 
-export async function buildDailySummary(exportPath: string | undefined, date = todayIsoDate()) {
-  const { start, end } = dayBounds(date);
-  const records = await listRecords({ exportPath, start: start.toISOString(), end: end.toISOString(), limit: 500 });
-  const workouts = await listWorkouts({ exportPath, start: start.toISOString(), end: end.toISOString(), limit: 500 });
-  const steps = sumType(records, "HKQuantityTypeIdentifierStepCount");
-  const activeEnergy = sumType(records, "HKQuantityTypeIdentifierActiveEnergyBurned");
-  const distance = sumType(records, "HKQuantityTypeIdentifierDistanceWalkingRunning");
-  const resting = averageType(records, "HKQuantityTypeIdentifierRestingHeartRate");
-  const hrv = averageType(records, "HKQuantityTypeIdentifierHeartRateVariabilitySDNN");
-  const heartRate = averageType(records, "HKQuantityTypeIdentifierHeartRate");
-  const sleepMinutes = sleepMinutesAsleep(records);
-
-  return {
-    kind: "daily_summary",
-    date,
-    generated_at: new Date().toISOString(),
-    source: "apple_health_export",
-    totals: {
-      steps,
-      active_energy_kcal: activeEnergy,
-      distance: distance || undefined
-    },
-    heart: {
-      average_bpm: round(heartRate),
-      resting_bpm: round(resting),
-      hrv_sdnn_ms: round(hrv)
-    },
-    sleep: {
-      minutes_asleep: sleepMinutes,
-      hours_asleep: round(sleepMinutes / 60)
-    },
-    workouts: {
-      count: workouts.length,
-      total_duration_minutes: round(workouts.reduce((sum, workout) => sum + (workout.duration ?? 0), 0)),
-      records: workouts
-    },
-    notes: [
-      "Summary is derived from an Apple Health export file, not live HealthKit.",
-      "This is wellness context, not medical diagnosis."
-    ]
-  };
+interface SummaryOptions {
+  timezone?: string;
 }
 
-export async function buildWeeklySummary(exportPath: string | undefined, endDate = todayIsoDate(), days = 7) {
+interface DayWindow {
+  date: string;
+  start: Date;
+  end: Date;
+}
+
+export async function buildDailySummary(exportPath: string | undefined, date?: string, options: SummaryOptions = {}) {
+  const timezone = options.timezone ?? "UTC";
+  const targetDate = date ?? todayIsoDate(timezone);
+  const window = buildDayWindow(targetDate, timezone);
+  const snapshot = await getExportSnapshot({ exportPath, start: window.start.toISOString(), end: window.end.toISOString() });
+  return summarizeDay(snapshot.records, snapshot.workouts, window, {
+    generatedAt: snapshot.generated_at,
+    source: snapshot.source,
+    timezone,
+    cacheHit: snapshot.cache.hit,
+    exportModifiedAt: snapshot.location.modified_at
+  });
+}
+
+export async function buildWeeklySummary(exportPath: string | undefined, endDate?: string, days = 7, options: SummaryOptions = {}) {
+  const timezone = options.timezone ?? "UTC";
   const normalizedDays = Math.min(Math.max(Math.trunc(days), 1), 30);
-  const end = new Date(`${endDate}T00:00:00.000Z`);
-  const summaries = [];
-  for (let offset = normalizedDays - 1; offset >= 0; offset -= 1) {
-    const date = new Date(end);
-    date.setUTCDate(end.getUTCDate() - offset);
-    summaries.push(await buildDailySummary(exportPath, date.toISOString().slice(0, 10)));
+  const targetEndDate = endDate ?? todayIsoDate(timezone);
+  const startDate = addCalendarDays(targetEndDate, -(normalizedDays - 1));
+  const rangeStart = dayBounds(startDate, timezone).start;
+  const rangeEnd = dayBounds(targetEndDate, timezone).end;
+  const snapshot = await getExportSnapshot({ exportPath, start: rangeStart.toISOString(), end: rangeEnd.toISOString() });
+  const daily = [];
+
+  for (let offset = 0; offset < normalizedDays; offset += 1) {
+    const date = addCalendarDays(startDate, offset);
+    const window = buildDayWindow(date, timezone);
+    daily.push(summarizeDay(
+      snapshot.records.filter((record) => recordOverlaps(record.startDate, record.endDate, window.start, window.end)),
+      snapshot.workouts.filter((workout) => recordOverlaps(workout.startDate, workout.endDate, window.start, window.end)),
+      window,
+      {
+        generatedAt: snapshot.generated_at,
+        source: snapshot.source,
+        timezone,
+        cacheHit: snapshot.cache.hit,
+        exportModifiedAt: snapshot.location.modified_at,
+        includeWorkoutRecords: false
+      }
+    ));
   }
 
   const totals = {
-    steps: summaries.reduce((sum, item) => sum + item.totals.steps, 0),
-    active_energy_kcal: summaries.reduce((sum, item) => sum + (item.totals.active_energy_kcal ?? 0), 0),
-    workouts: summaries.reduce((sum, item) => sum + item.workouts.count, 0),
-    sleep_minutes: summaries.reduce((sum, item) => sum + item.sleep.minutes_asleep, 0)
+    steps: daily.reduce((sum, item) => sum + item.totals.steps, 0),
+    active_energy_kcal: round(daily.reduce((sum, item) => sum + (item.totals.active_energy_kcal ?? 0), 0)),
+    distance: round(daily.reduce((sum, item) => sum + (item.totals.distance ?? 0), 0)),
+    workouts: daily.reduce((sum, item) => sum + item.workouts.count, 0),
+    workout_duration_minutes: round(daily.reduce((sum, item) => sum + item.workouts.total_duration_minutes, 0)),
+    sleep_minutes: daily.reduce((sum, item) => sum + item.sleep.minutes_asleep, 0),
+    mindful_minutes: round(daily.reduce((sum, item) => sum + item.mindfulness.minutes, 0))
   };
 
   return {
     kind: "weekly_summary",
-    end_date: endDate,
+    start_date: startDate,
+    end_date: targetEndDate,
     days: normalizedDays,
-    generated_at: new Date().toISOString(),
-    source: "apple_health_export",
+    timezone,
+    generated_at: snapshot.generated_at,
+    source: snapshot.source,
+    export_modified_at: snapshot.location.modified_at,
+    cache: {
+      hit: snapshot.cache.hit,
+      records_indexed: snapshot.records.length,
+      workouts_indexed: snapshot.workouts.length
+    },
     totals,
     averages: {
       steps_per_day: round(totals.steps / normalizedDays),
-      sleep_hours_per_day: round(totals.sleep_minutes / normalizedDays / 60)
+      active_energy_kcal_per_day: round((totals.active_energy_kcal ?? 0) / normalizedDays),
+      sleep_hours_per_day: round(totals.sleep_minutes / normalizedDays / 60),
+      hrv_sdnn_ms: averageDefined(daily.map((item) => item.heart.hrv_sdnn_ms)),
+      resting_bpm: averageDefined(daily.map((item) => item.heart.resting_bpm))
     },
-    daily: summaries,
+    trends: buildWeeklyTrends(daily),
+    daily,
     notes: [
       "Summary is derived from an Apple Health export file, not live HealthKit.",
       "This is wellness context, not medical diagnosis."
@@ -89,29 +104,225 @@ export function formatSummaryMarkdown(summary: Record<string, unknown>): string 
   return lines.join("\n");
 }
 
+function summarizeDay(records: AppleHealthRecord[], workouts: AppleHealthWorkout[], window: DayWindow, options: {
+  generatedAt: string;
+  source: string;
+  timezone: string;
+  cacheHit: boolean;
+  exportModifiedAt?: string;
+  includeWorkoutRecords?: boolean;
+}) {
+  const steps = sumType(records, "HKQuantityTypeIdentifierStepCount");
+  const activeEnergy = sumType(records, "HKQuantityTypeIdentifierActiveEnergyBurned");
+  const distance = sumType(records, "HKQuantityTypeIdentifierDistanceWalkingRunning");
+  const resting = averageType(records, "HKQuantityTypeIdentifierRestingHeartRate");
+  const hrv = averageType(records, "HKQuantityTypeIdentifierHeartRateVariabilitySDNN");
+  const heartRateValues = numericValues(records, "HKQuantityTypeIdentifierHeartRate");
+  const respiratoryRate = averageType(records, "HKQuantityTypeIdentifierRespiratoryRate");
+  const oxygenSaturation = averageType(records, "HKQuantityTypeIdentifierOxygenSaturation");
+  const sleep = sleepBreakdown(records);
+  const bodyMass = latestType(records, "HKQuantityTypeIdentifierBodyMass");
+  const mindfulMinutes = durationMinutes(records.filter((record) => record.type === "HKCategoryTypeIdentifierMindfulSession"));
+  const workoutDuration = round(workouts.reduce((sum, workout) => sum + workoutDurationMinutes(workout), 0)) ?? 0;
+
+  return {
+    kind: "daily_summary",
+    date: window.date,
+    timezone: options.timezone,
+    generated_at: options.generatedAt,
+    source: options.source,
+    export_modified_at: options.exportModifiedAt,
+    cache: {
+      hit: options.cacheHit,
+      records_indexed: records.length,
+      workouts_indexed: workouts.length
+    },
+    totals: {
+      steps,
+      active_energy_kcal: activeEnergy,
+      distance: distance || undefined
+    },
+    heart: {
+      average_bpm: averageValues(heartRateValues),
+      min_bpm: minValue(heartRateValues),
+      max_bpm: maxValue(heartRateValues),
+      resting_bpm: round(resting),
+      hrv_sdnn_ms: round(hrv),
+      respiratory_rate: round(respiratoryRate),
+      oxygen_saturation: round(oxygenSaturation)
+    },
+    sleep,
+    body: {
+      body_mass: bodyMass?.numeric_value,
+      body_mass_unit: bodyMass?.unit,
+      body_mass_recorded_at: bodyMass?.endDate ?? bodyMass?.startDate
+    },
+    mindfulness: {
+      minutes: round(mindfulMinutes) ?? 0
+    },
+    workouts: {
+      count: workouts.length,
+      total_duration_minutes: workoutDuration,
+      activity_counts: countBy(workouts, (workout) => workout.workoutActivityType || "unknown"),
+      records: options.includeWorkoutRecords === false ? undefined : workouts
+    },
+    data_quality: {
+      record_count: records.length,
+      workout_count: workouts.length,
+      has_sleep: sleep.minutes_asleep > 0,
+      has_heart: heartRateValues.length > 0 || resting !== undefined || hrv !== undefined,
+      has_activity: steps > 0 || workouts.length > 0
+    },
+    notes: [
+      "Summary is derived from an Apple Health export file, not live HealthKit.",
+      "This is wellness context, not medical diagnosis."
+    ]
+  };
+}
+
+function buildDayWindow(date: string, timezone: string): DayWindow {
+  const { start, end } = dayBounds(date, timezone);
+  return { date, start, end };
+}
+
+function buildWeeklyTrends(daily: Array<ReturnType<typeof summarizeDay>>) {
+  const first = daily[0];
+  const last = daily[daily.length - 1];
+  const split = Math.max(1, Math.floor(daily.length / 2));
+  const firstHalf = daily.slice(0, split);
+  const secondHalf = daily.slice(split);
+  const highestStepsDay = maxBy(daily, (item) => item.totals.steps);
+  const sleepDays = daily.filter((item) => item.sleep.minutes_asleep > 0);
+  const lowestSleepDay = minBy(sleepDays, (item) => item.sleep.minutes_asleep);
+
+  return {
+    steps_change_from_first_to_last: first && last ? last.totals.steps - first.totals.steps : undefined,
+    sleep_hours_change_from_first_to_last: first && last ? round(last.sleep.hours_asleep - first.sleep.hours_asleep) : undefined,
+    highest_steps_day: highestStepsDay ? { date: highestStepsDay.date, steps: highestStepsDay.totals.steps } : undefined,
+    lowest_sleep_day: lowestSleepDay ? { date: lowestSleepDay.date, hours_asleep: lowestSleepDay.sleep.hours_asleep } : undefined,
+    hrv_direction: direction(
+      averageDefined(firstHalf.map((item) => item.heart.hrv_sdnn_ms)),
+      averageDefined(secondHalf.map((item) => item.heart.hrv_sdnn_ms))
+    ),
+    resting_hr_direction: direction(
+      averageDefined(firstHalf.map((item) => item.heart.resting_bpm)),
+      averageDefined(secondHalf.map((item) => item.heart.resting_bpm))
+    )
+  };
+}
+
+function sleepBreakdown(records: AppleHealthRecord[]) {
+  const stageRecords = records.filter((record) => record.type === "HKCategoryTypeIdentifierSleepAnalysis");
+  const stages: Record<string, number> = {};
+  let minutesAsleep = 0;
+  let minutesInBed = 0;
+  let minutesAwake = 0;
+
+  for (const record of stageRecords) {
+    const minutes = recordDurationMinutes(record);
+    const stage = sleepStageName(record.value);
+    stages[stage] = round((stages[stage] ?? 0) + minutes) ?? 0;
+    if (/Asleep/i.test(record.value ?? "")) minutesAsleep += minutes;
+    if (/InBed/i.test(record.value ?? "")) minutesInBed += minutes;
+    if (/Awake/i.test(record.value ?? "")) minutesAwake += minutes;
+  }
+
+  return {
+    minutes_asleep: round(minutesAsleep) ?? 0,
+    hours_asleep: round(minutesAsleep / 60) ?? 0,
+    minutes_in_bed: round(minutesInBed) ?? 0,
+    awake_minutes: round(minutesAwake) ?? 0,
+    stages_minutes: stages
+  };
+}
+
+function sleepStageName(value: string | undefined): string {
+  if (!value) return "unknown";
+  return value
+    .replace(/^HKCategoryValueSleepAnalysis/, "")
+    .replace(/^Asleep/, "asleep_")
+    .replace(/([a-z])([A-Z])/g, "$1_$2")
+    .toLowerCase() || "unknown";
+}
+
 function sumType(records: AppleHealthRecord[], type: string): number {
   return round(records.filter((record) => record.type === type).reduce((sum, record) => sum + (record.numeric_value ?? 0), 0)) ?? 0;
 }
 
 function averageType(records: AppleHealthRecord[], type: string): number | undefined {
-  const values = records.filter((record) => record.type === type && record.numeric_value !== undefined).map((record) => record.numeric_value as number);
+  return averageValues(numericValues(records, type));
+}
+
+function numericValues(records: AppleHealthRecord[], type: string): number[] {
+  return records.filter((record) => record.type === type && record.numeric_value !== undefined).map((record) => record.numeric_value as number);
+}
+
+function latestType(records: AppleHealthRecord[], type: string): AppleHealthRecord | undefined {
+  return records
+    .filter((record) => record.type === type && record.numeric_value !== undefined)
+    .sort((left, right) => (parseAppleDate(right.endDate ?? right.startDate)?.getTime() ?? 0) - (parseAppleDate(left.endDate ?? left.startDate)?.getTime() ?? 0))[0];
+}
+
+function durationMinutes(records: AppleHealthRecord[]): number {
+  return records.reduce((sum, record) => sum + recordDurationMinutes(record), 0);
+}
+
+function recordDurationMinutes(record: AppleHealthRecord): number {
+  const start = parseAppleDate(record.startDate);
+  const end = parseAppleDate(record.endDate);
+  if (!start || !end) return 0;
+  return Math.max(0, end.getTime() - start.getTime()) / 60000;
+}
+
+function workoutDurationMinutes(workout: AppleHealthWorkout): number {
+  if (!workout.duration) return 0;
+  if (workout.durationUnit === "sec") return workout.duration / 60;
+  if (workout.durationUnit === "hr") return workout.duration * 60;
+  return workout.duration;
+}
+
+function averageDefined(values: Array<number | undefined>): number | undefined {
+  return averageValues(values.filter((value): value is number => value !== undefined));
+}
+
+function averageValues(values: number[]): number | undefined {
   if (values.length === 0) return undefined;
-  return values.reduce((sum, value) => sum + value, 0) / values.length;
+  return round(values.reduce((sum, value) => sum + value, 0) / values.length);
 }
 
-function sleepMinutesAsleep(records: AppleHealthRecord[]): number {
-  return round(records
-    .filter((record) => record.type === "HKCategoryTypeIdentifierSleepAnalysis" && /Asleep/i.test(record.value ?? ""))
-    .reduce((sum, record) => {
-      const start = parseAppleDate(record.startDate);
-      const end = parseAppleDate(record.endDate);
-      if (!start || !end) return sum;
-      return sum + Math.max(0, end.getTime() - start.getTime()) / 60000;
-    }, 0)) ?? 0;
+function minValue(values: number[]): number | undefined {
+  if (values.length === 0) return undefined;
+  return round(Math.min(...values));
 }
 
-function todayIsoDate(): string {
-  return new Date().toISOString().slice(0, 10);
+function maxValue(values: number[]): number | undefined {
+  if (values.length === 0) return undefined;
+  return round(Math.max(...values));
+}
+
+function direction(before: number | undefined, after: number | undefined): "up" | "down" | "flat" | "unknown" {
+  if (before === undefined || after === undefined) return "unknown";
+  const delta = after - before;
+  if (Math.abs(delta) < 0.5) return "flat";
+  return delta > 0 ? "up" : "down";
+}
+
+function countBy<T>(items: T[], getKey: (item: T) => string): Record<string, number> {
+  return Object.fromEntries(
+    [...items.reduce((map, item) => {
+      const key = getKey(item);
+      map.set(key, (map.get(key) ?? 0) + 1);
+      return map;
+    }, new Map<string, number>())].sort(([left], [right]) => left.localeCompare(right))
+  );
+}
+
+function minBy<T>(items: T[], getValue: (item: T) => number): T | undefined {
+  return items.reduce<T | undefined>((best, item) => best === undefined || getValue(item) < getValue(best) ? item : best, undefined);
+}
+
+function maxBy<T>(items: T[], getValue: (item: T) => number): T | undefined {
+  return items.reduce<T | undefined>((best, item) => best === undefined || getValue(item) > getValue(best) ? item : best, undefined);
 }
 
 function round(value: number | undefined): number | undefined {

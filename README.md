@@ -45,6 +45,12 @@ npx -y apple-health-mcp-unofficial setup --export-path /path/to/export.zip
 npx -y apple-health-mcp-unofficial doctor
 ```
 
+Or let the CLI find the newest local export in `Downloads`, `Desktop` or `Documents`, copy it into managed local storage, and save that path:
+
+```bash
+npx -y apple-health-mcp-unofficial setup --auto-import
+```
+
 Supported export paths:
 - `/path/to/export.zip`
 - `/path/to/apple_health_export/` (unzipped folder)
@@ -72,6 +78,11 @@ Three things to ask first:
 ```text
 Use apple_health_connection_status to check setup, then run apple_health_daily_summary.
 Give me a 5-line wellness brief for today.
+```
+
+```text
+Call apple_health_data_inventory first. What Apple Health signals and date ranges
+are available in this export?
 ```
 
 ```text
@@ -105,6 +116,7 @@ This package parses Apple Health exports from the Health app. When this README s
 **Start with these:**
 
 - `apple_health_connection_status` — verify export path before reading data
+- `apple_health_data_inventory` — discover available record types, date coverage, sources count and stale export risk
 - `apple_health_daily_summary` — daily wellness brief from export data
 - `apple_health_weekly_summary` — weekly comparison and habit signals
 
@@ -125,14 +137,14 @@ This package parses Apple Health exports from the Health app. When this README s
 ## Resources
 
 - `apple-health://capabilities`, `apple-health://agent-manifest`
-- `apple-health://summary/daily`, `apple-health://summary/weekly`
+- `apple-health://inventory`, `apple-health://summary/daily`, `apple-health://summary/weekly`
 
 ## Privacy & security
 
 - Apple Health exports are highly sensitive personal health data. Keep them local.
 - Never commit `export.xml` / `export.zip` to GitHub, paste raw exports into chat, or upload them to issues.
 - The export path is read-only; the MCP never modifies your export.
-- `APPLE_HEALTH_PRIVACY_MODE` defaults to `summary` for this connector (more conservative than other Delx Wellness connectors) since the dataset is rich and sensitive. Raw record dumps are opt-in.
+- `APPLE_HEALTH_PRIVACY_MODE` defaults to `summary` for this connector (more conservative than other Delx Wellness connectors) since the dataset is rich and sensitive. In summary mode, low-level list tools return aggregates instead of individual records. Raw record dumps are opt-in.
 - This is **not medical advice**. The server exposes data you exported yourself for personal AI workflows, not diagnosis or emergency monitoring.
 
 ## Configuration
@@ -140,9 +152,12 @@ This package parses Apple Health exports from the Health app. When this README s
 ```bash
 APPLE_HEALTH_EXPORT_PATH=/path/to/export.zip   # or export.xml or apple_health_export/
 APPLE_HEALTH_PRIVACY_MODE=summary              # summary | structured | raw
+APPLE_HEALTH_TIMEZONE=America/Fortaleza        # local-day summaries; defaults to UTC unless setup saves a timezone
 ```
 
-`setup` writes both into `~/.apple-health-mcp/config.json` with `0600` permissions.
+`setup` writes these settings into `~/.apple-health-mcp/config.json` with `0600` permissions.
+
+`setup --auto-import` scans common local folders for the newest Apple Health export and copies it to `~/.apple-health-mcp/exports/` with `0600` permissions. This automates the local import step after you transfer the export from the iPhone. Fully live HealthKit sync still requires a separate native bridge; this Node MCP intentionally reads local exports only.
 
 ## Hermes / remote setup
 

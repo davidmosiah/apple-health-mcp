@@ -7,12 +7,12 @@
     "url": "https://github.com/davidmosiah/apple-health-mcp",
     "source": "github"
   },
-  "version": "0.2.0",
+  "version": "0.2.1",
   "packages": [
     {
       "registryType": "npm",
       "identifier": "apple-health-mcp-unofficial",
-      "version": "0.2.0",
+      "version": "0.2.1",
       "transport": {
         "type": "stdio"
       },
@@ -20,6 +20,20 @@
         {
           "name": "APPLE_HEALTH_EXPORT_PATH",
           "description": "Path to export.xml, an Apple Health export directory, or export.zip.",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": false
+        },
+        {
+          "name": "APPLE_HEALTH_TIMEZONE",
+          "description": "IANA timezone used to interpret daily and weekly local-day summaries.",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": false
+        },
+        {
+          "name": "APPLE_HEALTH_PRIVACY_MODE",
+          "description": "summary, structured, or raw. Defaults to summary.",
           "isRequired": false,
           "format": "string",
           "isSecret": false

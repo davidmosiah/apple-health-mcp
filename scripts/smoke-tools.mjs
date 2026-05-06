@@ -6,6 +6,7 @@ const expectedTools = [
   'apple_health_agent_manifest',
   'apple_health_capabilities',
   'apple_health_connection_status',
+  'apple_health_data_inventory',
   'apple_health_daily_summary',
   'apple_health_list_records',
   'apple_health_list_workouts',
@@ -17,6 +18,7 @@ const expectedTools = [
 const expectedResources = [
   'apple-health://agent-manifest',
   'apple-health://capabilities',
+  'apple-health://inventory',
   'apple-health://summary/daily',
   'apple-health://summary/weekly'
 ];
@@ -27,7 +29,11 @@ const expectedPrompts = [
 ];
 
 const client = new Client({ name: 'apple-health-mcp-smoke-test', version: '0.0.0' });
-const transport = new StdioClientTransport({ command: 'node', args: ['dist/index.js'] });
+const transport = new StdioClientTransport({
+  command: 'node',
+  args: ['dist/index.js'],
+  env: { ...process.env, APPLE_HEALTH_EXPORT_PATH: 'fixtures/apple_health_export/export.xml' }
+});
 await client.connect(transport);
 try {
   const tools = await client.listTools();
@@ -39,15 +45,19 @@ try {
   const prompts = await client.listPrompts();
   assert.deepEqual(prompts.prompts.map((prompt) => prompt.name).sort(), expectedPrompts.sort());
 
+  const inventoryResult = await client.callTool({ name: 'apple_health_data_inventory', arguments: { response_format: 'json' } });
+  assert.equal(inventoryResult.structuredContent?.kind, 'data_inventory');
+  assert.equal(typeof inventoryResult.structuredContent?.source, 'string');
+
   const manifest = await client.callTool({ name: 'apple_health_agent_manifest', arguments: { client: 'hermes', response_format: 'json' } });
   assert.equal(manifest.structuredContent?.client, 'hermes');
   assert.equal(manifest.structuredContent?.healthkit_live_access, false);
   assert.ok(manifest.structuredContent?.agent_rules?.some((rule) => /export/i.test(rule)));
 
   const status = await client.callTool({ name: 'apple_health_connection_status', arguments: { client: 'hermes', response_format: 'json' } });
-  assert.equal(status.structuredContent?.ok, false);
+  assert.equal(status.structuredContent?.ok, true);
   assert.equal(status.structuredContent?.client, 'hermes');
-  assert.ok(status.structuredContent?.next_steps?.some((step) => step.includes('APPLE_HEALTH_EXPORT_PATH')));
+  assert.ok(status.structuredContent?.next_steps?.some((step) => step.includes('daily_summary')));
 
   console.log(JSON.stringify({ ok: true, tools: expectedTools.length, resources: expectedResources.length, prompts: expectedPrompts.length }, null, 2));
 } finally {

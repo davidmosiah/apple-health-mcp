@@ -17,6 +17,7 @@ try {
     const manifest = buildAgentManifest(target);
     assert.equal(manifest.client, target);
     assert.ok(manifest.recommended_first_calls.includes('apple_health_connection_status'));
+    assert.ok(manifest.recommended_first_calls.includes('apple_health_data_inventory'));
     assert.ok(manifest.recommended_first_calls.includes('apple_health_wellness_context'));
   }
 
@@ -29,6 +30,13 @@ try {
   assert.equal(status.structuredContent?.ok, true);
   assert.equal(status.structuredContent?.client, 'hermes');
   assert.equal(status.structuredContent?.export?.exists, true);
+
+  const inventory = await client.callTool({
+    name: 'apple_health_data_inventory',
+    arguments: { response_format: 'json' }
+  });
+  assert.equal(inventory.structuredContent?.kind, 'data_inventory');
+  assert.ok(inventory.structuredContent?.totals?.record_types >= 1);
 
   const context = await client.callTool({
     name: 'apple_health_wellness_context',

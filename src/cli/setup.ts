@@ -3,29 +3,50 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { NPM_PACKAGE_NAME, PINNED_NPM_PACKAGE } from "../constants.js";
 import { hermesConfigSnippet, hermesSkillMarkdown, parseAgentClientName, type AgentClientName } from "../services/agent-manifest.js";
+import { discoverLatestExport, importAppleHealthExport, type ImportResult } from "../services/import-export.js";
 import { writeLocalConfig } from "../services/local-config.js";
 import { parsePrivacyMode } from "../services/config.js";
 
 interface SetupOptions {
   client: AgentClientName;
   exportPath?: string;
+  importData: boolean;
+  autoImport: boolean;
   privacyMode: "summary" | "structured" | "raw";
+  timezone?: string;
   json: boolean;
   homeDir: string;
 }
 
 export async function runSetupCommand(args: string[]): Promise<number> {
   const options = parseSetupOptions(args);
+  let exportPath = options.exportPath;
+  let importResult: ImportResult | undefined;
+  if (options.autoImport && !exportPath) {
+    const discovered = await discoverLatestExport(options.homeDir);
+    if (!discovered) throw new Error("No Apple Health export was found in Downloads, Desktop or Documents. Transfer export.zip to this machine or pass --export-path.");
+    exportPath = discovered.path;
+  }
+  if (options.importData) {
+    if (!exportPath) throw new Error("Use --import <path>, --auto-import, or --export-path <path> with --import.");
+    importResult = await importAppleHealthExport(exportPath, options.homeDir);
+    exportPath = importResult.imported_path;
+  }
   const configPath = writeLocalConfig({
-    APPLE_HEALTH_EXPORT_PATH: options.exportPath,
-    APPLE_HEALTH_PRIVACY_MODE: options.privacyMode
+    APPLE_HEALTH_EXPORT_PATH: exportPath,
+    APPLE_HEALTH_PRIVACY_MODE: options.privacyMode,
+    APPLE_HEALTH_TIMEZONE: options.timezone,
+    APPLE_HEALTH_LAST_IMPORT_AT: importResult?.imported_at,
+    APPLE_HEALTH_LAST_IMPORT_SOURCE_PATH: importResult?.source_path
   }, options.homeDir);
   const clientConfig = writeClientConfig(options.client, options.homeDir);
   const output = {
     ok: true,
     config_path: configPath,
     client: options.client,
-    export_path: options.exportPath,
+    export_path: exportPath,
+    timezone: options.timezone,
+    import: importResult,
     client_config_path: clientConfig.path,
     hermes_skill_path: clientConfig.hermes_skill_path,
     hermes_config_backup_path: clientConfig.hermes_config_backup_path,
@@ -40,7 +61,9 @@ export async function runSetupCommand(args: string[]): Promise<number> {
     console.log("Apple Health MCP · Setup");
     console.log("");
     console.log(`  ✓  Local config       ${configPath}`);
-    if (options.exportPath) console.log(`  ✓  Export path        ${options.exportPath}`);
+    if (exportPath) console.log(`  ✓  Export path        ${exportPath}`);
+    if (importResult) console.log(`  ✓  Imported export    ${importResult.imported_path}`);
+    if (options.timezone) console.log(`  ✓  Timezone           ${options.timezone}`);
     console.log(`  ✓  MCP client config  ${clientConfig.path}`);
     if (clientConfig.hermes_skill_path) console.log(`  ✓  Hermes skill       ${clientConfig.hermes_skill_path}`);
     console.log("");
@@ -51,10 +74,15 @@ export async function runSetupCommand(args: string[]): Promise<number> {
 
 function parseSetupOptions(args: string[]): SetupOptions {
   const flags = parseFlags(args);
+  const importFlag = flags.get("import");
+  const importPath = importFlag && importFlag !== "true" ? importFlag : undefined;
   return {
     client: parseAgentClientName(flags.get("client")),
-    exportPath: flags.get("export-path"),
+    exportPath: flags.get("export-path") ?? importPath,
+    importData: flags.has("import") || flags.has("auto-import"),
+    autoImport: flags.has("auto-import"),
     privacyMode: parsePrivacyMode(flags.get("privacy-mode")) as "summary" | "structured" | "raw",
+    timezone: flags.get("timezone") ?? Intl.DateTimeFormat().resolvedOptions().timeZone,
     json: flags.has("json"),
     homeDir: flags.get("home-dir") ?? homedir()
   };

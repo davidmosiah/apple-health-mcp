@@ -4,7 +4,8 @@ import type { Readable } from "node:stream";
 import sax from "sax";
 import yauzl from "yauzl";
 import { DEFAULT_LIMIT, MAX_LIMIT } from "../constants.js";
-import type { AppleHealthRecord, AppleHealthWorkout } from "../types.js";
+import type { AppleHealthRecord, AppleHealthWorkout, AppleHealthWorkoutEvent } from "../types.js";
+import { parseFlexibleDate } from "./time.js";
 
 export interface ExportLocation {
   input_path?: string;
@@ -13,6 +14,8 @@ export interface ExportLocation {
   exists: boolean;
   kind: "missing" | "xml" | "directory" | "zip" | "unsupported";
   size_bytes?: number;
+  modified_at?: string;
+  mtime_ms?: number;
   note?: string;
 }
 
@@ -30,6 +33,31 @@ export interface WorkoutQuery {
   end?: string;
   limit?: number;
 }
+
+export interface SnapshotQuery {
+  exportPath?: string;
+  start?: string;
+  end?: string;
+}
+
+export interface AppleHealthSnapshot {
+  source: "apple_health_export";
+  generated_at: string;
+  location: ExportLocation;
+  range: {
+    start?: string;
+    end?: string;
+  };
+  cache: {
+    key: string;
+    hit: boolean;
+  };
+  records: AppleHealthRecord[];
+  workouts: AppleHealthWorkout[];
+}
+
+const SNAPSHOT_CACHE = new Map<string, AppleHealthSnapshot>();
+const MAX_SNAPSHOT_CACHE_ENTRIES = 6;
 
 export async function inspectExportLocation(inputPath?: string): Promise<ExportLocation> {
   if (!inputPath) {
@@ -58,7 +86,9 @@ export async function inspectExportLocation(inputPath?: string): Promise<ExportL
               export_xml_path: candidate,
               exists: true,
               kind: "directory",
-              size_bytes: candidateStat.size
+              size_bytes: candidateStat.size,
+              modified_at: candidateStat.mtime.toISOString(),
+              mtime_ms: candidateStat.mtimeMs
             };
           }
         } catch {
@@ -80,7 +110,9 @@ export async function inspectExportLocation(inputPath?: string): Promise<ExportL
         export_xml_path: resolvedPath,
         exists: true,
         kind: "xml",
-        size_bytes: stat.size
+        size_bytes: stat.size,
+        modified_at: stat.mtime.toISOString(),
+        mtime_ms: stat.mtimeMs
       };
     }
     if (stat.isFile() && extname(resolvedPath).toLowerCase() === ".zip") {
@@ -90,6 +122,8 @@ export async function inspectExportLocation(inputPath?: string): Promise<ExportL
         exists: true,
         kind: "zip",
         size_bytes: stat.size,
+        modified_at: stat.mtime.toISOString(),
+        mtime_ms: stat.mtimeMs,
         note: "Will read apple_health_export/export.xml from the zip."
       };
     }
@@ -120,13 +154,13 @@ export async function listRecords(query: RecordQuery): Promise<AppleHealthRecord
   const end = query.end ? parseAppleDate(query.end) : undefined;
   const records: AppleHealthRecord[] = [];
 
-  await parseExport(location, (name, attributes) => {
-    if (name !== "Record") return false;
-    const record = normalizeRecord(attributes);
-    if (query.type && record.type !== query.type) return false;
-    if (!overlaps(record.startDate, record.endDate, start, end)) return false;
-    records.push(record);
-    return records.length >= limit;
+  await parseExportEntities(location, {
+    onRecord(record) {
+      if (query.type && record.type !== query.type) return false;
+      if (!overlaps(record.startDate, record.endDate, start, end)) return false;
+      records.push(record);
+      return records.length >= limit;
+    }
   });
 
   return records;
@@ -140,32 +174,62 @@ export async function listWorkouts(query: WorkoutQuery): Promise<AppleHealthWork
   const end = query.end ? parseAppleDate(query.end) : undefined;
   const workouts: AppleHealthWorkout[] = [];
 
-  await parseExport(location, (name, attributes) => {
-    if (name !== "Workout") return false;
-    const workout = normalizeWorkout(attributes);
-    if (!overlaps(workout.startDate, workout.endDate, start, end)) return false;
-    workouts.push(workout);
-    return workouts.length >= limit;
+  await parseExportEntities(location, {
+    onWorkout(workout) {
+      if (!overlaps(workout.startDate, workout.endDate, start, end)) return false;
+      workouts.push(workout);
+      return workouts.length >= limit;
+    }
   });
 
   return workouts;
 }
 
-export function dayBounds(date: string): { start: Date; end: Date } {
-  const start = new Date(`${date}T00:00:00.000Z`);
-  const end = new Date(`${date}T23:59:59.999Z`);
-  return { start, end };
+export async function getExportSnapshot(query: SnapshotQuery): Promise<AppleHealthSnapshot> {
+  const location = await inspectExportLocation(query.exportPath);
+  if (!location.exists) throw new Error(location.note ?? "Apple Health export not found.");
+  const start = query.start ? parseAppleDate(query.start) : undefined;
+  const end = query.end ? parseAppleDate(query.end) : undefined;
+  const key = snapshotCacheKey(location, query);
+  const cached = SNAPSHOT_CACHE.get(key);
+  if (cached) return { ...cached, cache: { ...cached.cache, hit: true } };
+
+  const records: AppleHealthRecord[] = [];
+  const workouts: AppleHealthWorkout[] = [];
+  await parseExportEntities(location, {
+    onRecord(record) {
+      if (!overlaps(record.startDate, record.endDate, start, end)) return false;
+      records.push(record);
+      return false;
+    },
+    onWorkout(workout) {
+      if (!overlaps(workout.startDate, workout.endDate, start, end)) return false;
+      workouts.push(workout);
+      return false;
+    }
+  });
+
+  const snapshot: AppleHealthSnapshot = {
+    source: "apple_health_export",
+    generated_at: new Date().toISOString(),
+    location,
+    range: {
+      start: query.start,
+      end: query.end
+    },
+    cache: {
+      key,
+      hit: false
+    },
+    records,
+    workouts
+  };
+  cacheSnapshot(key, snapshot);
+  return snapshot;
 }
 
 export function parseAppleDate(value: string | undefined): Date | undefined {
-  if (!value) return undefined;
-  const appleMatch = /^(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2}:\d{2}) ([+-]\d{2})(\d{2})$/.exec(value);
-  if (appleMatch) {
-    const parsed = new Date(`${appleMatch[1]}T${appleMatch[2]}${appleMatch[3]}:${appleMatch[4]}`);
-    return Number.isNaN(parsed.getTime()) ? undefined : parsed;
-  }
-  const parsed = new Date(value);
-  return Number.isNaN(parsed.getTime()) ? undefined : parsed;
+  return parseFlexibleDate(value);
 }
 
 function normalizeLimit(value: number | undefined): number {
@@ -204,6 +268,15 @@ function normalizeWorkout(attributes: Record<string, unknown>): AppleHealthWorko
   };
 }
 
+function normalizeWorkoutEvent(attributes: Record<string, unknown>): AppleHealthWorkoutEvent {
+  return {
+    type: optionalString(attributes.type),
+    date: optionalString(attributes.date),
+    duration: optionalNumber(attributes.duration),
+    durationUnit: optionalString(attributes.durationUnit)
+  };
+}
+
 function optionalString(value: unknown): string | undefined {
   return value === undefined ? undefined : String(value);
 }
@@ -223,15 +296,53 @@ function overlaps(startValue: string | undefined, endValue: string | undefined, 
   return true;
 }
 
-async function parseExport(location: ExportLocation, onElement: (name: string, attributes: Record<string, unknown>) => boolean): Promise<void> {
+export function recordOverlaps(startValue: string | undefined, endValue: string | undefined, start?: Date, end?: Date): boolean {
+  return overlaps(startValue, endValue, start, end);
+}
+
+interface EntityVisitor {
+  onRecord?: (record: AppleHealthRecord) => boolean;
+  onWorkout?: (workout: AppleHealthWorkout) => boolean;
+}
+
+async function parseExportEntities(location: ExportLocation, visitor: EntityVisitor): Promise<void> {
   const stream = await openXmlStream(location);
   await new Promise<void>((resolvePromise, reject) => {
     const parser = sax.createStream(true, { trim: false, lowercase: false });
     let stopped = false;
+    let currentRecord: AppleHealthRecord | undefined;
+    let currentWorkout: AppleHealthWorkout | undefined;
 
     parser.on("opentag", (node) => {
       if (stopped) return;
-      const shouldStop = onElement(node.name, node.attributes as Record<string, unknown>);
+      const attributes = node.attributes as Record<string, unknown>;
+      if (node.name === "Record") {
+        currentRecord = normalizeRecord(attributes);
+        return;
+      }
+      if (node.name === "Workout") {
+        currentWorkout = normalizeWorkout(attributes);
+        return;
+      }
+      if (node.name === "MetadataEntry") {
+        addMetadata(currentRecord ?? currentWorkout, attributes);
+        return;
+      }
+      if (node.name === "WorkoutEvent" && currentWorkout) {
+        currentWorkout.events = currentWorkout.events ?? [];
+        currentWorkout.events.push(normalizeWorkoutEvent(attributes));
+      }
+    });
+    parser.on("closetag", (name) => {
+      if (stopped) return;
+      let shouldStop = false;
+      if (name === "Record" && currentRecord) {
+        shouldStop = visitor.onRecord?.(currentRecord) ?? false;
+        currentRecord = undefined;
+      } else if (name === "Workout" && currentWorkout) {
+        shouldStop = visitor.onWorkout?.(currentWorkout) ?? false;
+        currentWorkout = undefined;
+      }
       if (shouldStop) {
         stopped = true;
         stream.destroy();
@@ -247,6 +358,34 @@ async function parseExport(location: ExportLocation, onElement: (name: string, a
     stream.on("error", reject);
     stream.pipe(parser);
   });
+}
+
+function addMetadata(entity: AppleHealthRecord | AppleHealthWorkout | undefined, attributes: Record<string, unknown>): void {
+  if (!entity) return;
+  const key = optionalString(attributes.key);
+  const value = optionalString(attributes.value);
+  if (!key || value === undefined) return;
+  entity.metadata = entity.metadata ?? {};
+  entity.metadata[key] = value;
+}
+
+function snapshotCacheKey(location: ExportLocation, query: SnapshotQuery): string {
+  return [
+    location.resolved_path ?? location.export_xml_path ?? location.input_path ?? "unknown",
+    location.size_bytes ?? 0,
+    location.mtime_ms ?? 0,
+    query.start ?? "",
+    query.end ?? ""
+  ].join("|");
+}
+
+function cacheSnapshot(key: string, snapshot: AppleHealthSnapshot): void {
+  SNAPSHOT_CACHE.set(key, snapshot);
+  while (SNAPSHOT_CACHE.size > MAX_SNAPSHOT_CACHE_ENTRIES) {
+    const oldest = SNAPSHOT_CACHE.keys().next().value;
+    if (!oldest) break;
+    SNAPSHOT_CACHE.delete(oldest);
+  }
 }
 
 async function openXmlStream(location: ExportLocation): Promise<Readable> {

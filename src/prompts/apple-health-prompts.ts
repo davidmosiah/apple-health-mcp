@@ -13,7 +13,7 @@ export function registerAppleHealthPrompts(server: McpServer): void {
       role: "user",
       content: {
         type: "text",
-        text: `Call apple_health_connection_status first. Then call apple_health_daily_summary${date ? ` for ${date}` : ""}. Summarize activity, heart, sleep and workouts as wellness context. Do not provide medical diagnosis.`
+        text: `Call apple_health_connection_status first, then apple_health_data_inventory if the available date range is unknown. Then call apple_health_daily_summary${date ? ` for ${date}` : ""}. Summarize activity, heart, sleep and workouts as wellness context. Do not provide medical diagnosis.`
       }
     }]
   }));
@@ -30,7 +30,7 @@ export function registerAppleHealthPrompts(server: McpServer): void {
       role: "user",
       content: {
         type: "text",
-        text: `Call apple_health_connection_status first. Then call apple_health_weekly_summary${end_date ? ` ending ${end_date}` : ""}${days ? ` for ${days} days` : ""}. Compare steps, sleep, workouts and heart signals. Keep guidance non-medical and privacy-conscious.`
+        text: `Call apple_health_connection_status first, then apple_health_data_inventory if the available date range is unknown. Then call apple_health_weekly_summary${end_date ? ` ending ${end_date}` : ""}${days ? ` for ${days} days` : ""}. Compare steps, sleep, workouts and heart signals. Keep guidance non-medical and privacy-conscious.`
       }
     }]
   }));

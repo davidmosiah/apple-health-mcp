@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, rmSync, readFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, rmSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
@@ -41,6 +41,25 @@ try {
   const status = JSON.parse(doctor.stdout);
   assert.equal(status.ok, true);
   assert.equal(status.export.exists, true);
+
+  const autoHome = mkdtempSync(join(tmpdir(), 'apple-health-mcp-cli-auto-'));
+  mkdirSync(join(autoHome, 'Downloads'), { recursive: true });
+  copyFileSync(exportPath, join(autoHome, 'Downloads', 'export.xml'));
+  const autoSetup = spawnSync(process.execPath, [
+    'dist/index.js',
+    'setup',
+    '--auto-import',
+    '--json'
+  ], {
+    encoding: 'utf8',
+    env: { ...process.env, HOME: autoHome }
+  });
+  assert.equal(autoSetup.status, 0, autoSetup.stderr);
+  const autoPayload = JSON.parse(autoSetup.stdout);
+  assert.ok(autoPayload.import.imported_path.includes('.apple-health-mcp/exports/apple-health-export-'));
+  assert.ok(existsSync(autoPayload.import.imported_path));
+  assert.match(readFileSync(autoPayload.config_path, 'utf8'), /APPLE_HEALTH_LAST_IMPORT_AT/);
+  rmSync(autoHome, { recursive: true, force: true });
 
   console.log(JSON.stringify({ ok: true, cli_ux: true, setup: true, doctor: true }, null, 2));
 } finally {

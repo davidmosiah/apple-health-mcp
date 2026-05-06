@@ -25,10 +25,12 @@ try {
   assert.equal(manifest.hermes.tool_name_prefix, 'mcp_apple_health_');
   assert.equal(manifest.hermes.no_gateway_restart_for_data_access, true);
   assert.equal(manifest.healthkit_live_access, false);
+  assert.ok(manifest.hermes.common_tool_names.includes('mcp_apple_health_apple_health_data_inventory'));
   assert.ok(JSON.stringify(manifest.hermes.recommended_config).includes(pinnedPackage));
 
   const resource = await client.readResource({ uri: 'apple-health://agent-manifest' });
   assert.match(resource.contents[0]?.text ?? '', /mcp_apple_health_apple_health_connection_status/);
+  assert.match(resource.contents[0]?.text ?? '', /mcp_apple_health_apple_health_data_inventory/);
 
   const setup = spawnSync(process.execPath, [
     'dist/index.js',

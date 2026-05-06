@@ -3,6 +3,7 @@ import {
   AgentManifestInputSchema,
   ConnectionStatusInputSchema,
   DailySummaryInputSchema,
+  InventoryInputSchema,
   RecordListInputSchema,
   ResponseOnlyInputSchema,
   WellnessContextInputSchema,
@@ -18,6 +19,8 @@ import { listRecords, listWorkouts } from "../services/apple-health-export.js";
 import { bulletList, makeError, makeResponse } from "../services/format.js";
 import { buildDailySummary, buildWeeklySummary, formatSummaryMarkdown } from "../services/summary.js";
 import { buildWellnessContext, formatWellnessContextMarkdown } from "../services/context.js";
+import { buildDataInventory, formatInventoryMarkdown } from "../services/inventory.js";
+import { recordPrivacyView, workoutPrivacyView } from "../services/privacy.js";
 
 export function registerAppleHealthTools(server: McpServer): void {
   server.registerTool("apple_health_agent_manifest", {
@@ -36,13 +39,13 @@ export function registerAppleHealthTools(server: McpServer): void {
     inputSchema: ResponseOnlyInputSchema.shape,
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false }
   }, async ({ response_format }) => {
-    const capabilities = buildCapabilities();
-    return makeResponse(capabilities, response_format, bulletList("Apple Health MCP Capabilities", {
-      project: capabilities.project,
-      source: capabilities.api_boundary.source,
-      live_healthkit_access: capabilities.api_boundary.healthkit_live_access,
-      recommended_first_tools: "apple_health_connection_status, apple_health_daily_summary, apple_health_weekly_summary"
-    }));
+      const capabilities = buildCapabilities();
+      return makeResponse(capabilities, response_format, bulletList("Apple Health MCP Capabilities", {
+        project: capabilities.project,
+        source: capabilities.api_boundary.source,
+        live_healthkit_access: capabilities.api_boundary.healthkit_live_access,
+        recommended_first_tools: "apple_health_connection_status, apple_health_data_inventory, apple_health_daily_summary, apple_health_weekly_summary"
+      }));
   });
 
   server.registerTool("apple_health_connection_status", {
@@ -80,17 +83,19 @@ export function registerAppleHealthTools(server: McpServer): void {
     try {
       const config = getConfig();
       const records = await listRecords({ exportPath: config.exportPath, type: params.type, start: params.start, end: params.end, limit: params.limit });
+      const privacyMode = params.privacy_mode ?? config.privacyMode;
       const output = {
         source: "apple_health_export",
         type: params.type,
-        privacy_mode: params.privacy_mode ?? config.privacyMode,
+        privacy_mode: privacyMode,
         count: records.length,
-        records
+        ...recordPrivacyView(records, privacyMode, config.timezone)
       };
       return makeResponse(output, params.response_format, bulletList("Apple Health Records", {
         type: params.type ?? "any",
         count: records.length,
-        source: "apple_health_export"
+        source: "apple_health_export",
+        privacy_mode: privacyMode
       }));
     } catch (error) {
       return makeError((error as Error).message);
@@ -106,16 +111,38 @@ export function registerAppleHealthTools(server: McpServer): void {
     try {
       const config = getConfig();
       const workouts = await listWorkouts({ exportPath: config.exportPath, start: params.start, end: params.end, limit: params.limit });
+      const privacyMode = params.privacy_mode ?? config.privacyMode;
       const output = {
         source: "apple_health_export",
-        privacy_mode: params.privacy_mode ?? config.privacyMode,
+        privacy_mode: privacyMode,
         count: workouts.length,
-        workouts
+        ...workoutPrivacyView(workouts, privacyMode, config.timezone)
       };
       return makeResponse(output, params.response_format, bulletList("Apple Health Workouts", {
         count: workouts.length,
-        source: "apple_health_export"
+        source: "apple_health_export",
+        privacy_mode: privacyMode
       }));
+    } catch (error) {
+      return makeError((error as Error).message);
+    }
+  });
+
+  server.registerTool("apple_health_data_inventory", {
+    title: "Apple Health Data Inventory",
+    description: "Scan the local Apple Health export once and report available record types, workouts, date coverage, freshness and safe next calls.",
+    inputSchema: InventoryInputSchema.shape,
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true }
+  }, async ({ start, end, timezone, privacy_mode, response_format }) => {
+    try {
+      const config = getConfig();
+      const inventory = await buildDataInventory(config.exportPath, {
+        start,
+        end,
+        timezone: timezone ?? config.timezone,
+        privacyMode: privacy_mode ?? config.privacyMode
+      });
+      return makeResponse(inventory, response_format, formatInventoryMarkdown(inventory));
     } catch (error) {
       return makeError((error as Error).message);
     }
@@ -126,9 +153,10 @@ export function registerAppleHealthTools(server: McpServer): void {
     description: "Build a daily wellness summary from local Apple Health export data. It is not live HealthKit and not medical advice.",
     inputSchema: DailySummaryInputSchema.shape,
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true }
-  }, async ({ date, response_format }) => {
+  }, async ({ date, timezone, response_format }) => {
     try {
-      const summary = await buildDailySummary(getConfig().exportPath, date);
+      const config = getConfig();
+      const summary = await buildDailySummary(config.exportPath, date, { timezone: timezone ?? config.timezone });
       return makeResponse(summary, response_format, formatSummaryMarkdown(summary));
     } catch (error) {
       return makeError((error as Error).message);
@@ -140,9 +168,10 @@ export function registerAppleHealthTools(server: McpServer): void {
     description: "Normalize local Apple Health export sleep, workout and activity data into the shared wellness_context shape for recommendation engines.",
     inputSchema: WellnessContextInputSchema.shape,
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true }
-  }, async ({ date, soreness, injury_flags, notes, response_format }) => {
+  }, async ({ date, timezone, soreness, injury_flags, notes, response_format }) => {
     try {
-      const context = await buildWellnessContext(getConfig().exportPath, { date, soreness, injury_flags, notes });
+      const config = getConfig();
+      const context = await buildWellnessContext(config.exportPath, { date, timezone: timezone ?? config.timezone, soreness, injury_flags, notes });
       return makeResponse(context, response_format, formatWellnessContextMarkdown(context));
     } catch (error) {
       return makeError((error as Error).message);
@@ -154,9 +183,10 @@ export function registerAppleHealthTools(server: McpServer): void {
     description: "Build a weekly wellness summary from local Apple Health export data. It is not live HealthKit and not medical advice.",
     inputSchema: WeeklySummaryInputSchema.shape,
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true }
-  }, async ({ end_date, days, response_format }) => {
+  }, async ({ end_date, days, timezone, response_format }) => {
     try {
-      const summary = await buildWeeklySummary(getConfig().exportPath, end_date, days);
+      const config = getConfig();
+      const summary = await buildWeeklySummary(config.exportPath, end_date, days, { timezone: timezone ?? config.timezone });
       return makeResponse(summary, response_format, formatSummaryMarkdown(summary));
     } catch (error) {
       return makeError((error as Error).message);

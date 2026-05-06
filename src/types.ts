@@ -10,6 +10,9 @@ export interface ToolResponse<T> extends Record<string, unknown> {
 export interface AppleHealthConfig {
   exportPath?: string;
   privacyMode: PrivacyMode;
+  timezone?: string;
+  lastImportAt?: string;
+  lastImportSourcePath?: string;
 }
 
 export interface AppleHealthRecord {
@@ -21,6 +24,7 @@ export interface AppleHealthRecord {
   creationDate?: string;
   startDate?: string;
   endDate?: string;
+  metadata?: Record<string, string>;
 }
 
 export interface AppleHealthWorkout {
@@ -35,4 +39,13 @@ export interface AppleHealthWorkout {
   totalDistanceUnit?: string;
   totalEnergyBurned?: number;
   totalEnergyBurnedUnit?: string;
+  metadata?: Record<string, string>;
+  events?: AppleHealthWorkoutEvent[];
+}
+
+export interface AppleHealthWorkoutEvent {
+  type?: string;
+  date?: string;
+  duration?: number;
+  durationUnit?: string;
 }

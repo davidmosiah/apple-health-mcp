@@ -6,6 +6,9 @@ import type { PrivacyMode } from "../types.js";
 export interface LocalAppleHealthConfig {
   APPLE_HEALTH_EXPORT_PATH?: string;
   APPLE_HEALTH_PRIVACY_MODE?: PrivacyMode;
+  APPLE_HEALTH_TIMEZONE?: string;
+  APPLE_HEALTH_LAST_IMPORT_AT?: string;
+  APPLE_HEALTH_LAST_IMPORT_SOURCE_PATH?: string;
 }
 
 export function localConfigPath(homeDir = homedir()): string {
