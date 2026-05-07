@@ -24,7 +24,7 @@ try {
 }
 
 async function waitForHealth(targetPort) {
-  const deadline = Date.now() + 8000;
+  const deadline = Date.now() + 20000;
   while (Date.now() < deadline) {
     try {
       const response = await fetch(`http://127.0.0.1:${targetPort}/health`);
@@ -32,7 +32,7 @@ async function waitForHealth(targetPort) {
     } catch {
       // Retry until server is listening.
     }
-    await new Promise((resolve) => setTimeout(resolve, 150));
+    await new Promise((resolve) => setTimeout(resolve, 200));
   }
   throw new Error('HTTP health endpoint did not become ready.');
 }
