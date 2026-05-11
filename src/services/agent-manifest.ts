@@ -23,7 +23,10 @@ const STANDARD_TOOLS = [
   "apple_health_demo",
   "apple_health_list_records",
   "apple_health_list_workouts",
+  "apple_health_onboarding",
   "apple_health_privacy_audit",
+  "apple_health_profile_get",
+  "apple_health_profile_update",
   "apple_health_quickstart",
   "apple_health_weekly_summary",
   "apple_health_wellness_context"
@@ -56,7 +59,7 @@ export function buildAgentManifest(client: AgentClientName = "generic") {
       managed_exports_dir: "~/.apple-health-mcp/exports",
       supported_record_types: SUPPORTED_RECORD_TYPES
     },
-    recommended_first_calls: ["apple_health_quickstart", "apple_health_demo", "apple_health_connection_status", "apple_health_data_inventory", "apple_health_wellness_context", "apple_health_daily_summary", "apple_health_weekly_summary"],
+    recommended_first_calls: ["apple_health_profile_get", "apple_health_quickstart", "apple_health_demo", "apple_health_connection_status", "apple_health_data_inventory", "apple_health_wellness_context", "apple_health_daily_summary", "apple_health_weekly_summary"],
     standard_tools: STANDARD_TOOLS,
     resources: ["apple-health://agent-manifest", "apple-health://capabilities", "apple-health://inventory", "apple-health://summary/daily", "apple-health://summary/weekly"],
     hermes: {

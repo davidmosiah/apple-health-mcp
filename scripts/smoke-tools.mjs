@@ -11,7 +11,10 @@ const expectedTools = [
   'apple_health_demo',
   'apple_health_list_records',
   'apple_health_list_workouts',
+  'apple_health_onboarding',
   'apple_health_privacy_audit',
+  'apple_health_profile_get',
+  'apple_health_profile_update',
   'apple_health_quickstart',
   'apple_health_weekly_summary',
   'apple_health_wellness_context'
