@@ -7,3 +7,4 @@ dist/
 /export.zip
 /apple_health_export/
 *.bak-apple-health-mcp-*
+.mcpregistry_*

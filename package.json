@@ -1,6 +1,6 @@
 {
   "name": "apple-health-mcp-unofficial",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "Unofficial local-first MCP server for Apple Health export data.",
   "type": "module",
   "bin": {
@@ -74,8 +74,7 @@
   "homepage": "https://wellness.delx.ai/connectors/apple-health",
   "mcpName": "io.github.davidmosiah/apple-health-mcp",
   "publishConfig": {
-    "access": "public",
-    "provenance": true
+    "access": "public"
   },
   "main": "dist/index.js"
 }
