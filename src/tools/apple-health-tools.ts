@@ -30,6 +30,7 @@ import {
 import { buildDailySummary, buildWeeklySummary, formatSummaryMarkdown } from "../services/summary.js";
 import { buildWellnessContext, formatWellnessContextMarkdown } from "../services/context.js";
 import { buildDataInventory, formatInventoryMarkdown } from "../services/inventory.js";
+import { buildExportFreshness, formatExportFreshnessMarkdown } from "../services/freshness.js";
 import { recordPrivacyView, workoutPrivacyView } from "../services/privacy.js";
 
 export function registerAppleHealthTools(server: McpServer): void {
@@ -283,6 +284,30 @@ export function registerAppleHealthTools(server: McpServer): void {
         source: "apple_health_export",
         privacy_mode: privacyMode
       }));
+    } catch (error) {
+      return makeError((error as Error).message);
+    }
+  });
+
+  server.registerTool("apple_health_export_freshness", {
+    title: "Apple Health Export Freshness",
+    description:
+      "Check how recently the local Apple Health export file/directory was written. Returns mtime, days_since_export, an is_stale flag, and a recommendation. Considered stale if the export is older than 30 days, or older than 7 days with no recent records (the inventory's latest-record date is also older than 7 days). Use before relying on apple_health_daily_summary or apple_health_wellness_context to confirm the export is fresh.",
+    inputSchema: ResponseOnlyInputSchema.shape,
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true }
+  }, async ({ response_format }) => {
+    try {
+      const config = getConfig();
+      // Lightweight: try to enrich with the inventory's latest-record age if the export is parseable.
+      let daysSinceLatestRecord: number | undefined;
+      try {
+        const inventory = await buildDataInventory(config.exportPath, { timezone: config.timezone, privacyMode: "summary" });
+        daysSinceLatestRecord = inventory.freshness.days_since_latest_data;
+      } catch {
+        // If inventory build fails (no export, parse error), fall back to mtime-only check.
+      }
+      const freshness = await buildExportFreshness(config.exportPath, { daysSinceLatestRecord });
+      return makeResponse(freshness, response_format, formatExportFreshnessMarkdown(freshness));
     } catch (error) {
       return makeError((error as Error).message);
     }

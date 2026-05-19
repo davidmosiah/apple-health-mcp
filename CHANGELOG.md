@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.2 - 2026-05-19
+
+### Added
+
+- **`apple_health_export_freshness` workflow tool.** Returns the local export file mtime, `days_since_export`, an `is_stale` flag, and a `recommendation` string. Considered stale when the export is older than 30 days, or older than 7 days with no recent records (the inventory's latest-record date also older than 7 days). Useful before relying on summary/wellness-context calls. Tool count: 15 → 16.
+- **Stale-export warning surfaced inside `apple_health_connection_status`.** When the export is stale, `connection_status` now returns an `export_freshness` block (`days_since_export`, `is_stale`, `stale_reason`, `recommendation`) and a `warnings: [...]` array so agents can flag this without an extra round-trip.
+
 ## 0.4.1 - 2026-05-11
 
 ### Fixed

@@ -9,6 +9,7 @@ const expectedTools = [
   'apple_health_daily_summary',
   'apple_health_data_inventory',
   'apple_health_demo',
+  'apple_health_export_freshness',
   'apple_health_list_records',
   'apple_health_list_workouts',
   'apple_health_onboarding',

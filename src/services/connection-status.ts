@@ -6,6 +6,7 @@ import type { AppleHealthConfig } from "../types.js";
 import { HERMES_DIRECT_TOOLS, type AgentClientName } from "./agent-manifest.js";
 import { getConfig } from "./config.js";
 import { inspectExportLocation } from "./apple-health-export.js";
+import { buildExportFreshness } from "./freshness.js";
 import { localConfigPath } from "./local-config.js";
 
 export async function buildConnectionStatus(options: { client?: AgentClientName; env?: NodeJS.ProcessEnv; homeDir?: string } = {}) {
@@ -15,6 +16,11 @@ export async function buildConnectionStatus(options: { client?: AgentClientName;
   const nodeSupported = Number(process.versions.node.split(".")[0] ?? 0) >= 20;
   const clientChecks = options.client === "hermes" ? { hermes: await inspectHermesClient(homeDir) } : undefined;
   const ok = nodeSupported && location.exists;
+  const freshness = await buildExportFreshness(config.exportPath);
+  const warnings: string[] = [];
+  if (freshness.is_stale && freshness.exists) {
+    warnings.push(`Export is stale (${freshness.days_since_export} days old). ${freshness.recommendation}`);
+  }
   return {
     ok,
     ready_for_apple_health_export: location.exists,
@@ -32,6 +38,13 @@ export async function buildConnectionStatus(options: { client?: AgentClientName;
       last_import_source_path: config.lastImportSourcePath
     },
     export: location,
+    export_freshness: {
+      days_since_export: freshness.days_since_export,
+      is_stale: freshness.is_stale,
+      stale_reason: freshness.stale_reason,
+      recommendation: freshness.recommendation
+    },
+    warnings,
     client_checks: clientChecks,
     next_steps: buildNextSteps({ nodeSupported, location })
   };
