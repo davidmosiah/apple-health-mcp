@@ -7,6 +7,7 @@ import { HERMES_DIRECT_TOOLS, type AgentClientName } from "./agent-manifest.js";
 import { getConfig } from "./config.js";
 import { inspectExportLocation } from "./apple-health-export.js";
 import { buildExportFreshness } from "./freshness.js";
+import { getIncrementalCacheStats } from "./incremental-cache.js";
 import { localConfigPath } from "./local-config.js";
 
 export async function buildConnectionStatus(options: { client?: AgentClientName; env?: NodeJS.ProcessEnv; homeDir?: string } = {}) {
@@ -17,6 +18,7 @@ export async function buildConnectionStatus(options: { client?: AgentClientName;
   const clientChecks = options.client === "hermes" ? { hermes: await inspectHermesClient(homeDir) } : undefined;
   const ok = nodeSupported && location.exists;
   const freshness = await buildExportFreshness(config.exportPath);
+  const incrementalCache = await getIncrementalCacheStats(homeDir);
   const warnings: string[] = [];
   if (freshness.is_stale && freshness.exists) {
     warnings.push(`Export is stale (${freshness.days_since_export} days old). ${freshness.recommendation}`);
@@ -43,6 +45,15 @@ export async function buildConnectionStatus(options: { client?: AgentClientName;
       is_stale: freshness.is_stale,
       stale_reason: freshness.stale_reason,
       recommendation: freshness.recommendation
+    },
+    incremental_cache: {
+      exists: incrementalCache.exists,
+      path: incrementalCache.path,
+      size_bytes: incrementalCache.size_bytes,
+      updated_at: incrementalCache.updated_at,
+      export_mtime_ms: incrementalCache.export_mtime_ms,
+      category_count: incrementalCache.category_count,
+      categories: incrementalCache.categories
     },
     warnings,
     client_checks: clientChecks,

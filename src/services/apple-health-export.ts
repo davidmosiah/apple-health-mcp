@@ -6,6 +6,12 @@ import yauzl from "yauzl";
 import { DEFAULT_LIMIT, MAX_LIMIT } from "../constants.js";
 import type { AppleHealthRecord, AppleHealthWorkout, AppleHealthWorkoutEvent } from "../types.js";
 import { parseFlexibleDate } from "./time.js";
+import {
+  getLastParsedAt,
+  invalidateIfExportChanged,
+  loadCache,
+  saveCache
+} from "./incremental-cache.js";
 
 export interface ExportLocation {
   input_path?: string;
@@ -25,6 +31,12 @@ export interface RecordQuery {
   start?: string;
   end?: string;
   limit?: number;
+  /**
+   * When true, skip records older than the per-category last-parsed timestamp
+   * in the incremental cache and persist the newest seen timestamp back. The
+   * cache auto-invalidates when the export file mtime changes.
+   */
+  useIncrementalCache?: boolean;
 }
 
 export interface WorkoutQuery {
@@ -154,14 +166,44 @@ export async function listRecords(query: RecordQuery): Promise<AppleHealthRecord
   const end = query.end ? parseAppleDate(query.end) : undefined;
   const records: AppleHealthRecord[] = [];
 
+  let incrementalCutoff: Date | undefined;
+  let useIncremental = false;
+  const cachePath = location.resolved_path ?? location.export_xml_path ?? location.input_path;
+  if (query.useIncrementalCache && query.type && cachePath) {
+    useIncremental = true;
+    await invalidateIfExportChanged(cachePath, location.mtime_ms);
+    const cached = await getLastParsedAt(query.type);
+    if (cached) {
+      const parsed = parseAppleDate(cached);
+      if (parsed) incrementalCutoff = parsed;
+    }
+  }
+
+  let newestSeenMs = 0;
   await parseExportEntities(location, {
     onRecord(record) {
       if (query.type && record.type !== query.type) return false;
       if (!overlaps(record.startDate, record.endDate, start, end)) return false;
+      if (incrementalCutoff) {
+        const recordStart = parseAppleDate(record.startDate);
+        if (recordStart && recordStart <= incrementalCutoff) return false;
+      }
+      if (useIncremental) {
+        const ts = parseAppleDate(record.startDate);
+        if (ts && ts.getTime() > newestSeenMs) newestSeenMs = ts.getTime();
+      }
       records.push(record);
       return records.length >= limit;
     }
   });
+
+  if (useIncremental && query.type && newestSeenMs > 0 && cachePath) {
+    const cache = await loadCache();
+    cache.export_path = cachePath;
+    cache.export_mtime_ms = location.mtime_ms;
+    cache.categories[query.type] = new Date(newestSeenMs).toISOString();
+    await saveCache(cache);
+  }
 
   return records;
 }

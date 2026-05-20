@@ -27,6 +27,7 @@ export const RecordListInputSchema = z.object({
   end: z.string().optional().describe("Optional ISO date/time upper bound."),
   limit: z.number().int().min(1).max(MAX_LIMIT).default(DEFAULT_LIMIT),
   privacy_mode: PrivacyModeSchema,
+  incremental_cache: z.boolean().optional().describe("When true and `type` is set, skip records already seen in a previous call (per-category cache at ~/.apple-health-mcp/incremental-cache.json). Cache auto-invalidates when the export file mtime changes."),
   response_format: ResponseFormatSchema
 }).strict();
 

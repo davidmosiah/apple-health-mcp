@@ -17,6 +17,7 @@ export const HERMES_DIRECT_TOOLS = [
 const STANDARD_TOOLS = [
   "apple_health_agent_manifest",
   "apple_health_capabilities",
+  "apple_health_clear_incremental_cache",
   "apple_health_connection_status",
   "apple_health_data_inventory",
   "apple_health_daily_summary",

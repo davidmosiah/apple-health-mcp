@@ -5,6 +5,7 @@ import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 const expectedTools = [
   'apple_health_agent_manifest',
   'apple_health_capabilities',
+  'apple_health_clear_incremental_cache',
   'apple_health_connection_status',
   'apple_health_daily_summary',
   'apple_health_data_inventory',

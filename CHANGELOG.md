@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.4.3 - 2026-05-20
+
+### Added
+
+- **Incremental import cache** at `~/.apple-health-mcp/incremental-cache.json` (chmod 600). Persists the latest parsed timestamp per HealthKit category so repeated `apple_health_list_records` calls can skip already-seen records on large exports (1M+ records). Opt-in per call via `incremental_cache: true` (requires `type` filter). The cache is automatically invalidated when the export file mtime changes (signaling a fresh export from the Health app).
+- **`apple_health_clear_incremental_cache` tool** for manual cache invalidation when you want to force a full re-parse without re-exporting from the iPhone. Tool count: 16 → 17.
+- **`incremental_cache` block in `apple_health_connection_status`** showing cache existence, file size, last-update timestamp, tracked export mtime, and per-category last-parsed entries.
+
 ## 0.4.2 - 2026-05-19
 
 ### Added
