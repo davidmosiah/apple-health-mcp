@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.5.0 - 2026-05-29
+
+### Added
+
+- **Watch-folder auto-reimport (no macOS required).** Point the connector at a folder via `APPLE_HEALTH_WATCH_PATH`, `~/.apple-health-mcp/config.json`, or `setup --watch-path <dir>`. When a newer Apple Health export appears there — `export.xml`, `export.zip`, an `apple_health_export/` directory, or any `*apple*health*.zip` — it is auto-promoted to the active export and the snapshot + incremental caches are cleared so the next summary reflects the new data. Reconciliation runs on server startup, live via filesystem events on long-running transports, and on demand. Turns the one-shot manual-export reader into a recurring-refresh workflow.
+- **`apple_health_reimport` tool** for an explicit re-scan of the watch folder (`check_only: true` previews without promoting; `force: true` re-promotes the newest export to force a cache refresh). Tool count: 17 → 18.
+- **`watch_folder` block + warning in `apple_health_connection_status`** reporting the watch path, whether the active export is the latest, the last watch-import timestamp, and a warning when a newer export is waiting to be imported.
+- **`setup --watch-path <dir>`** persists the watch folder and immediately promotes any export already sitting in it.
+
+### Note
+
+- The native HealthKit bridge (live, no manual export) genuinely requires a macOS/iOS native component and remains out of scope for this Node MCP server.
+
 ## 0.4.3 - 2026-05-20
 
 ### Added

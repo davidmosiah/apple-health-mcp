@@ -9,7 +9,10 @@ export function getConfig(env: NodeJS.ProcessEnv = process.env, homeDir = homedi
     privacyMode: parsePrivacyMode(env.APPLE_HEALTH_PRIVACY_MODE ?? local.APPLE_HEALTH_PRIVACY_MODE),
     timezone: env.APPLE_HEALTH_TIMEZONE ?? local.APPLE_HEALTH_TIMEZONE ?? process.env.TZ ?? "UTC",
     lastImportAt: local.APPLE_HEALTH_LAST_IMPORT_AT,
-    lastImportSourcePath: local.APPLE_HEALTH_LAST_IMPORT_SOURCE_PATH
+    lastImportSourcePath: local.APPLE_HEALTH_LAST_IMPORT_SOURCE_PATH,
+    watchPath: env.APPLE_HEALTH_WATCH_PATH ?? local.APPLE_HEALTH_WATCH_PATH,
+    lastWatchImportPath: local.APPLE_HEALTH_LAST_WATCH_IMPORT_PATH,
+    lastWatchImportAt: local.APPLE_HEALTH_LAST_WATCH_IMPORT_AT
   };
 }
 

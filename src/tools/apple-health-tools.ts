@@ -32,6 +32,7 @@ import { buildWellnessContext, formatWellnessContextMarkdown } from "../services
 import { buildDataInventory, formatInventoryMarkdown } from "../services/inventory.js";
 import { buildExportFreshness, formatExportFreshnessMarkdown } from "../services/freshness.js";
 import { clearCache } from "../services/incremental-cache.js";
+import { getWatchStatus, reconcileWatchFolder } from "../services/watch.js";
 import { recordPrivacyView, workoutPrivacyView } from "../services/privacy.js";
 
 export function registerAppleHealthTools(server: McpServer): void {
@@ -483,6 +484,48 @@ export function registerAppleHealthTools(server: McpServer): void {
           existed: payload.existed,
           path: payload.path,
           message: payload.message
+        }));
+      } catch (error) {
+        return makeError((error as Error).message);
+      }
+    }
+  );
+
+  server.registerTool(
+    "apple_health_reimport",
+    {
+      title: "Reimport Apple Health Export from Watch Folder",
+      description:
+        "Re-scan the configured watch folder (APPLE_HEALTH_WATCH_PATH or `setup --watch-path <dir>`) for a newer Apple Health export. If a newer export.xml/export.zip/apple_health_export directory is found, it is promoted to the active export, the in-memory snapshot cache and incremental cache are cleared, and subsequent summaries reflect the new data. With check_only=true, only report what would happen without promoting. This is the cross-platform recurring-refresh path — the native HealthKit bridge needs macOS and is separate.",
+      inputSchema: {
+        check_only: z.boolean().optional().describe("When true, report the watch-folder status without promoting a new export."),
+        force: z.boolean().optional().describe("When true, re-promote the newest export in the folder even if it already matches the active export (forces a cache refresh)."),
+        response_format: z.enum(["markdown", "json"]).default("markdown")
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true }
+    },
+    async ({ check_only, force, response_format }) => {
+      try {
+        if (check_only === true) {
+          const status = await getWatchStatus();
+          const payload = { ok: true, action: "check_only", ...status };
+          return makeResponse(payload, response_format, bulletList("Apple Health Reimport (check only)", {
+            configured: status.configured,
+            watch_path: status.watch_path ?? "(none)",
+            watch_path_exists: status.watch_path_exists,
+            latest_export: status.latest_export?.path ?? "(none)",
+            active_export_is_latest: status.active_export_is_latest ?? "unknown",
+            last_watch_import_at: status.last_watch_import_at ?? "never"
+          }));
+        }
+        const result = await reconcileWatchFolder({ force: force === true });
+        const payload = { ok: true, ...result };
+        return makeResponse(payload, response_format, bulletList("Apple Health Reimport", {
+          changed: result.changed,
+          reason: result.reason,
+          watch_path: result.watch_path ?? "(none)",
+          active_export_path: result.active_export_path ?? "(none)",
+          message: result.message
         }));
       } catch (error) {
         return makeError((error as Error).message);

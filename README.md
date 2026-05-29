@@ -79,6 +79,16 @@ Supported export paths:
 - `/path/to/apple_health_export/` (unzipped folder)
 - `/path/to/export.xml` (raw export file)
 
+**Keep it fresh — watch a folder (no macOS needed):**
+
+Apple Health is a manual export, so the usual pain is that your data goes stale the moment you stop re-running setup. Point the connector at a folder you drop new exports into:
+
+```bash
+npx -y apple-health-mcp-unofficial setup --watch-path /path/to/health-exports
+```
+
+Now every time you export from your iPhone and drop the new `export.zip` (or `export.xml`, or unzipped `apple_health_export/`) into that folder, the connector auto-promotes the newest one to be the active export — on server startup and live while it runs — and refreshes the cached summaries. You can also trigger a re-scan on demand with the `apple_health_reimport` tool. This is the cross-platform recurring-refresh path; a fully live HealthKit bridge still needs a native macOS/iOS component.
+
 Then add this to your MCP client config:
 
 ```json
@@ -152,6 +162,10 @@ This package parses Apple Health exports from the Health app. When this README s
 - `apple_health_list_records` — bounded records by `type` (e.g. `HKQuantityTypeIdentifierStepCount`), `start`, `end`, `limit`
 - `apple_health_list_workouts` — bounded workout records
 
+**Keeping data fresh**
+
+- `apple_health_reimport` — re-scan the watch folder (`APPLE_HEALTH_WATCH_PATH`) and promote the newest export, refreshing summaries; pass `check_only: true` to preview without promoting
+
 ## Prompts
 
 - `apple_health_daily_review` — daily wellness review with non-medical framing
@@ -176,11 +190,14 @@ This package parses Apple Health exports from the Health app. When this README s
 APPLE_HEALTH_EXPORT_PATH=/path/to/export.zip   # or export.xml or apple_health_export/
 APPLE_HEALTH_PRIVACY_MODE=summary              # summary | structured | raw
 APPLE_HEALTH_TIMEZONE=America/Fortaleza        # local-day summaries; defaults to UTC unless setup saves a timezone
+APPLE_HEALTH_WATCH_PATH=/path/to/health-exports # optional: auto-reimport the newest export dropped here
 ```
 
 `setup` writes these settings into `~/.apple-health-mcp/config.json` with `0600` permissions.
 
 `setup --auto-import` scans common local folders for the newest Apple Health export and copies it to `~/.apple-health-mcp/exports/` with `0600` permissions. This automates the local import step after you transfer the export from the iPhone. Fully live HealthKit sync still requires a separate native bridge; this Node MCP intentionally reads local exports only.
+
+`setup --watch-path <dir>` (or `APPLE_HEALTH_WATCH_PATH`) makes the connector treat a folder as a drop zone. On startup, while running (via filesystem events), and whenever the `apple_health_reimport` tool is called, it promotes the newest Apple Health export found there — `export.xml`, `export.zip`, an `apple_health_export/` directory, or any `*apple*health*.zip` — to be the active export and clears the snapshot + incremental caches so the next summary reflects the new data. `apple_health_connection_status` reports the watch folder state and warns when a newer export is waiting.
 
 ## Hermes / remote setup
 

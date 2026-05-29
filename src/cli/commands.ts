@@ -129,6 +129,7 @@ Usage:
   apple-health-mcp-server setup --export-path <path>     Save local export path and client config
   apple-health-mcp-server setup --import <path>          Copy export into managed local storage
   apple-health-mcp-server setup --auto-import            Find latest local export and copy it into managed storage
+  apple-health-mcp-server setup --watch-path <dir>       Watch a folder; auto-reimport when a newer export appears
   apple-health-mcp-server setup --timezone <iana>        Save local-day timezone for daily/weekly summaries
   apple-health-mcp-server setup --client hermes          Save Hermes config and skill
   apple-health-mcp-server doctor                         Check setup and next steps
@@ -139,6 +140,12 @@ Usage:
 Required data:
   APPLE_HEALTH_EXPORT_PATH=/path/to/export.xml
   APPLE_HEALTH_TIMEZONE=America/Fortaleza
+  APPLE_HEALTH_WATCH_PATH=/path/to/watch-folder   (optional; auto-reimport source)
+
+Recurring use:
+  Point --watch-path at a folder you drop new export.zip files into. On startup and
+  via the apple_health_reimport MCP tool, the connector promotes the newest export
+  it finds there and refreshes the cached summaries.
 
 This connector reads Apple Health export files. It does not provide live HealthKit access.
 `);

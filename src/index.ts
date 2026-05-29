@@ -4,11 +4,52 @@ import express from "express";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import { watch as watchFs } from "node:fs";
 import { SERVER_NAME, SERVER_VERSION } from "./constants.js";
 import { runCliCommand } from "./cli/commands.js";
 import { registerAppleHealthPrompts } from "./prompts/apple-health-prompts.js";
 import { registerAppleHealthResources } from "./resources/apple-health-resources.js";
 import { registerAppleHealthTools } from "./tools/apple-health-tools.js";
+import { reconcileWatchFolder, resolveWatchPath } from "./services/watch.js";
+
+/**
+ * Promote a newer export from the watch folder (if any) at startup. Best-effort:
+ * a missing/empty watch folder is a no-op and never blocks server boot.
+ */
+async function reconcileWatchOnStart(): Promise<void> {
+  try {
+    const result = await reconcileWatchFolder();
+    if (result.changed) console.error(`[apple-health-mcp] ${result.message}`);
+  } catch (error) {
+    console.error(`[apple-health-mcp] Watch-folder reconcile failed: ${(error as Error).message}`);
+  }
+}
+
+/**
+ * For long-running transports, watch the folder for filesystem changes and
+ * reconcile (debounced) so a freshly dropped export is picked up without a
+ * manual `apple_health_reimport` call. No-op when no watch folder is configured.
+ */
+function startWatchFolderWatcher(): void {
+  const watchPath = resolveWatchPath();
+  if (!watchPath) return;
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    const watcher = watchFs(watchPath, { recursive: true }, () => {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => {
+        void reconcileWatchOnStart();
+      }, 1500);
+    });
+    watcher.on("error", (error) => {
+      console.error(`[apple-health-mcp] Watch-folder watcher error: ${error.message}`);
+    });
+    console.error(`[apple-health-mcp] Watching ${watchPath} for new Apple Health exports.`);
+  } catch (error) {
+    // `recursive` is unsupported on some platforms; degrade to startup + tool-driven reconcile.
+    console.error(`[apple-health-mcp] Live watch unavailable (${(error as Error).message}); using on-demand reimport.`);
+  }
+}
 
 function createServer(): McpServer {
   const server = new McpServer({
@@ -22,6 +63,7 @@ function createServer(): McpServer {
 }
 
 async function runStdio(): Promise<void> {
+  await reconcileWatchOnStart();
   const server = createServer();
   const transport = new StdioServerTransport();
   await server.connect(transport);
@@ -56,6 +98,8 @@ async function runHttp(): Promise<void> {
       if (!res.headersSent) res.status(500).json({ jsonrpc: "2.0", error: { code: -32603, message: "Internal server error" }, id: null });
     }
   });
+  await reconcileWatchOnStart();
+  startWatchFolderWatcher();
   app.listen(port, host, () => {
     console.error(`${SERVER_NAME} HTTP transport listening on http://${host}:${port}/mcp`);
   });

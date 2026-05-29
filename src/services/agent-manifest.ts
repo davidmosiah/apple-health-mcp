@@ -30,6 +30,7 @@ const STANDARD_TOOLS = [
   "apple_health_profile_get",
   "apple_health_profile_update",
   "apple_health_quickstart",
+  "apple_health_reimport",
   "apple_health_weekly_summary",
   "apple_health_wellness_context"
 ];
@@ -57,6 +58,8 @@ export function buildAgentManifest(client: AgentClientName = "generic") {
       live_healthkit_bridge: "planned native iOS bridge; not available in this Node MCP server",
       export_path_env: "APPLE_HEALTH_EXPORT_PATH",
       timezone_env: "APPLE_HEALTH_TIMEZONE",
+      watch_path_env: "APPLE_HEALTH_WATCH_PATH",
+      watch_folder: "Drop a new export.zip/export.xml into APPLE_HEALTH_WATCH_PATH; the server auto-promotes the newest one on startup and via apple_health_reimport.",
       local_config: "~/.apple-health-mcp/config.json",
       managed_exports_dir: "~/.apple-health-mcp/exports",
       supported_record_types: SUPPORTED_RECORD_TYPES

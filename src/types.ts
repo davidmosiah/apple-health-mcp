@@ -13,6 +13,12 @@ export interface AppleHealthConfig {
   timezone?: string;
   lastImportAt?: string;
   lastImportSourcePath?: string;
+  /** Folder watched for new Apple Health exports (auto-reimport source). */
+  watchPath?: string;
+  /** Path of the export most recently promoted from the watch folder. */
+  lastWatchImportPath?: string;
+  /** ISO timestamp of the last successful watch-folder reimport. */
+  lastWatchImportAt?: string;
 }
 
 export interface AppleHealthRecord {

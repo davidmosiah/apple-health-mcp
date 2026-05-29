@@ -18,6 +18,7 @@ const expectedTools = [
   'apple_health_profile_get',
   'apple_health_profile_update',
   'apple_health_quickstart',
+  'apple_health_reimport',
   'apple_health_weekly_summary',
   'apple_health_wellness_context'
 ];
