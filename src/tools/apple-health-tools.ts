@@ -464,7 +464,7 @@ export function registerAppleHealthTools(server: McpServer): void {
     {
       title: "Clear Apple Health Incremental Import Cache",
       description:
-        "Manually clear the incremental import cache at ~/.apple-health-mcp/incremental-cache.json. The cache tracks the latest parsed timestamp per HealthKit category so subsequent `apple_health_list_records` calls (with `incremental_cache: true`) skip already-seen records. Use this when you want to force a full re-parse without changing the export file. The cache also auto-invalidates when the export file mtime changes.",
+        "Manually clear the incremental import cache at ~/.apple-health-mcp/incremental-cache.json. The cache tracks the latest parsed timestamp per HealthKit category so subsequent `apple_health_list_records` calls (with `incremental_cache: true`) skip already-seen records. Use this when you want to force a full re-parse without changing the export file. The cache also auto-invalidates when the export file mtime changes. Gated by explicit_user_intent: true (requires explicit user intent to wipe local cache).",
       inputSchema: ResponseOnlyInputSchema.shape,
       annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false }
     },
@@ -496,7 +496,7 @@ export function registerAppleHealthTools(server: McpServer): void {
     {
       title: "Reimport Apple Health Export from Watch Folder",
       description:
-        "Re-scan the configured watch folder (APPLE_HEALTH_WATCH_PATH or `setup --watch-path <dir>`) for a newer Apple Health export. If a newer export.xml/export.zip/apple_health_export directory is found, it is promoted to the active export, the in-memory snapshot cache and incremental cache are cleared, and subsequent summaries reflect the new data. With check_only=true, only report what would happen without promoting. This is the cross-platform recurring-refresh path — the native HealthKit bridge needs macOS and is separate.",
+        "Re-scan the configured watch folder (APPLE_HEALTH_WATCH_PATH or `setup --watch-path <dir>`) for a newer Apple Health export. If a newer export.xml/export.zip/apple_health_export directory is found, it is promoted to the active export, the in-memory snapshot cache and incremental cache are cleared, and subsequent summaries reflect the new data. With check_only=true, only report what would happen without promoting. This is the cross-platform recurring-refresh path — the native HealthKit bridge needs macOS and is separate. Requires explicit user intent when promoting a new export (force or non-check_only); check_only is read-only inspection.",
       inputSchema: {
         check_only: z.boolean().optional().describe("When true, report the watch-folder status without promoting a new export."),
         force: z.boolean().optional().describe("When true, re-promote the newest export in the folder even if it already matches the active export (forces a cache refresh)."),
