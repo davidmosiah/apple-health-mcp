@@ -1,3 +1,17 @@
+## 0.7.0 - 2026-08-01
+
+### Fixed
+
+- **`apple_health_list_workouts` answered "how much did I train?" with the first page's totals.** Same defect 0.6.0 fixed in `apple_health_list_records`, one function below, in its worse form: the workout aggregate is made of **sums**, so a capped page does not merely misrepresent the period — it understates it. Measured on a synthetic 128-workout fixture (120 runs of 60 min / 5 km / 500 kcal plus 8 yoga sessions), the default call with zero flags reported `total_energy_kcal: 25000`, `total_duration_minutes: 3000`, `total_distance: 250`, `count_by_activity: { Running: 50 }` and a `date_range` ending on the 50th workout. The truth: `60800`, `7440`, `600`, `{ Running: 120, Yoga: 8 }`, ending on the 128th. An agent asked "how far did I run this month" got less than half, with nothing in the payload to reveal it. The scan now keeps streaming past the cap and accumulates totals over **every** workout matching the filter, while still returning at most `limit` workouts.
+
+### Added
+
+- **Truncation is now explicit in `apple_health_list_workouts`**: `limit_applied`, `truncated`, `matched_count` and `aggregate_scope: "all_matching_workouts"`, matching the `apple_health_list_records` contract exactly. `count` keeps its old meaning — workouts in the returned listing. The markdown output (the default `response_format`) carries the truncation flags plus `aggregate_total_energy_kcal` / `aggregate_total_duration_minutes` / `aggregate_total_distance`, so the corrected totals are visible without asking for JSON.
+- `aggregate.workout_count` states how many workouts the totals were computed from, and `disclosure` reads `summary_mode_omits_individual_workouts_aggregate_covers_all_matching_workouts` when the aggregate came from the full scan.
+- **`scanWorkouts()`** in `services/apple-health-export.ts` and **`createWorkoutAggregator()`** in `services/privacy.ts` — the streaming primitives behind the fix. `listWorkouts()` keeps its old signature and behavior.
+- Workout scenario in `npm run test:aggregate`: the assertions above fail on 0.6.0 (`total_energy_kcal` 25000 vs 60800) and cover raw/structured paging, an over-sized limit, and a narrow date window proving the aggregate still follows the filter instead of summing the whole export.
+- **`privacy_mode: "summary"` + `incremental_cache: true` now has a test** (`npm run test:incremental-cache`, scenario 9). Every prior scenario ran in `raw` mode — the one path where the scan stops at `limit` and nothing walks past the cap — so the interaction between aggregating past the page and advancing the incremental cursor was untested. The behavior was already correct; the gate makes it stay that way: paging 120 synthetic records at 50 must return 50/50/20/0 with per-page aggregate sums of 1..120, 51..120 and 101..120. A cursor advanced over aggregated-but-unreturned records makes the second page return 0 and silently loses 70 records — verified by injecting exactly that regression, which the old suite passed green.
+
 ## 0.6.0 - 2026-08-01
 
 ### Fixed

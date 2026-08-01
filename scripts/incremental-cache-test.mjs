@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, existsSync, statSync, utimesSync, readFileSync } from 'node:fs';
+import { mkdtempSync, existsSync, mkdirSync, rmSync, statSync, utimesSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
@@ -143,4 +143,111 @@ try {
   console.log(JSON.stringify({ ok: true, incremental_cache: true, scenarios: 8 }, null, 2));
 } finally {
   await client.close();
+}
+
+/**
+ * 9. privacy_mode=summary + incremental_cache together.
+ *
+ * Every scenario above runs in raw mode, which is the one path where the scan stops at
+ * `limit` and nothing walks past the cap. In summary mode the scan keeps reading past
+ * the page to build the aggregate, while the cursor may only advance across records the
+ * caller actually received — advance it over aggregated-but-unreturned records and the
+ * next call silently skips them. That combination had no test, so a regression there
+ * would have passed green while losing health records.
+ *
+ * Fixture: 120 synthetic step records, one per minute, values 1..120, paged at 50.
+ * All data is synthetic; no real Apple Health export is read.
+ */
+const summaryHome = mkdtempSync(join(tmpdir(), 'apple-health-mcp-summary-cache-'));
+const summaryExportDir = join(summaryHome, 'export');
+const summaryExportPath = join(summaryExportDir, 'export.xml');
+mkdirSync(summaryExportDir, { recursive: true });
+
+const TOTAL = 120;
+const PAGE = 50;
+const sumRange = (from, to) => ((from + to) * (to - from + 1)) / 2;
+const stampFor = (index) => {
+  const hour = String(Math.floor(index / 60)).padStart(2, '0');
+  const minute = String(index % 60).padStart(2, '0');
+  return `2026-03-01 ${hour}:${minute}:00 -0300`;
+};
+const isoFor = (index) => {
+  const hour = String(Math.floor(index / 60)).padStart(2, '0');
+  const minute = String(index % 60).padStart(2, '0');
+  return new Date(`2026-03-01T${hour}:${minute}:00-03:00`).toISOString();
+};
+
+let summaryXml = '<?xml version="1.0" encoding="UTF-8"?>\n<HealthData locale="en_US">\n';
+for (let index = 0; index < TOTAL; index += 1) {
+  const stamp = stampFor(index);
+  summaryXml += `  <Record type="HKQuantityTypeIdentifierStepCount" sourceName="Synthetic Watch" unit="count" creationDate="${stamp}" startDate="${stamp}" endDate="${stamp}" value="${index + 1}"/>\n`;
+}
+summaryXml += '</HealthData>\n';
+writeFileSync(summaryExportPath, summaryXml);
+
+const summaryClient = new Client({ name: 'apple-health-summary-cache-test', version: '0.0.0' });
+await summaryClient.connect(new StdioClientTransport({
+  command: 'node',
+  args: ['dist/index.js'],
+  env: { ...process.env, HOME: summaryHome, APPLE_HEALTH_EXPORT_PATH: summaryExportPath }
+}));
+
+try {
+  const page = (n) => summaryClient.callTool({
+    name: 'apple_health_list_records',
+    arguments: {
+      type: 'HKQuantityTypeIdentifierStepCount',
+      limit: PAGE,
+      incremental_cache: true,
+      privacy_mode: 'summary',
+      response_format: 'json'
+    }
+  }).then((result) => ({ n, payload: result.structuredContent }));
+
+  const first = await page(1);
+  assert.equal(first.payload?.count, PAGE, 'summary + cache: first page must return exactly `limit` records');
+  assert.equal(first.payload?.matched_count, TOTAL, 'summary + cache: matched_count must cover every unseen record');
+  assert.equal(first.payload?.truncated, true, 'summary + cache: first page must disclose truncation');
+  assert.equal(first.payload?.aggregate?.numeric?.count, TOTAL, 'summary + cache: aggregate must cover every unseen record');
+  assert.equal(first.payload?.aggregate?.numeric?.sum, sumRange(1, TOTAL), 'summary + cache: aggregate sum must cover records 1..120');
+  assert.equal(first.payload?.aggregate?.date_range?.first, isoFor(0), 'summary + cache: aggregate must start at the oldest unseen record');
+
+  // The cursor must have advanced by exactly one page — not past the records the
+  // aggregate walked over but never returned.
+  const second = await page(2);
+  assert.equal(second.payload?.count, PAGE, 'summary + cache: second page must return the next 50 records, not skip them');
+  assert.equal(second.payload?.matched_count, TOTAL - PAGE, 'summary + cache: second page must see exactly the records the first page did not return');
+  assert.equal(
+    second.payload?.aggregate?.numeric?.sum,
+    sumRange(PAGE + 1, TOTAL),
+    'summary + cache: second aggregate must cover records 51..120 — a drifting cursor changes this sum'
+  );
+  assert.equal(second.payload?.aggregate?.date_range?.first, isoFor(PAGE), 'summary + cache: second page must resume at record 51');
+
+  const third = await page(3);
+  assert.equal(third.payload?.count, TOTAL - 2 * PAGE, 'summary + cache: third page must return the remaining 20 records');
+  assert.equal(third.payload?.truncated, false, 'summary + cache: the last page is not truncated');
+  assert.equal(third.payload?.matched_count, TOTAL - 2 * PAGE, 'summary + cache: matched_count must be exact on the last page');
+  assert.equal(
+    third.payload?.aggregate?.numeric?.sum,
+    sumRange(2 * PAGE + 1, TOTAL),
+    'summary + cache: third aggregate must cover records 101..120'
+  );
+
+  const fourth = await page(4);
+  assert.equal(fourth.payload?.count, 0, 'summary + cache: nothing is left after the whole set was paged');
+  assert.equal(fourth.payload?.matched_count, 0, 'summary + cache: matched_count must be 0 once every record was returned');
+  assert.equal(fourth.payload?.aggregate?.numeric, undefined, 'summary + cache: an empty match set has no numeric aggregate');
+
+  // Every record was returned exactly once across the pages.
+  assert.equal(
+    first.payload.count + second.payload.count + third.payload.count + fourth.payload.count,
+    TOTAL,
+    'summary + cache: paging must return each record exactly once — no record may be skipped'
+  );
+
+  console.log(JSON.stringify({ ok: true, incremental_cache_summary_mode: true, records: TOTAL, pages: 4 }, null, 2));
+} finally {
+  await summaryClient.close();
+  rmSync(summaryHome, { recursive: true, force: true });
 }

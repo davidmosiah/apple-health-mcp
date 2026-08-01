@@ -1,5 +1,5 @@
 /**
- * Regression gate for two statistics defects:
+ * Regression gate for three statistics defects:
  *
  * 1. apple_health_list_records returned `aggregate` computed over the records that
  *    survived `limit`, presented as if it described the whole filtered set. An agent
@@ -10,6 +10,12 @@
  * 2. summary.ts computed per-day min/max with Math.min(...values), which throws
  *    RangeError once a day carries more than ~120k numeric records.
  *    Fixture: a single synthetic day with 130k heart-rate records.
+ *
+ * 3. apple_health_list_workouts had defect 1 in its worse form: the workout aggregate
+ *    is made of SUMS (energy, duration, distance), so aggregating only the first page
+ *    answers "how much did I run this month" with a number that is simply too small.
+ *    Fixture: 128 synthetic workouts against the default limit of 50, with the totals
+ *    known exactly.
  *
  * All data here is synthetic. No real Apple Health export is ever read by this test.
  */
@@ -105,6 +111,86 @@ function buildTruncationExport() {
   };
 }
 
+function dayFrom(baseIsoDate, dayOffset) {
+  const base = new Date(`${baseIsoDate}T12:00:00Z`);
+  base.setUTCDate(base.getUTCDate() + dayOffset);
+  return base.toISOString().slice(0, 10);
+}
+
+function dayStamp(baseIsoDate, dayOffset, hour) {
+  return `${dayFrom(baseIsoDate, dayOffset)} ${String(hour).padStart(2, '0')}:00:00 ${OFFSET}`;
+}
+
+function dayIso(baseIsoDate, dayOffset, hour) {
+  const day = dayFrom(baseIsoDate, dayOffset);
+  return new Date(`${day}T${String(hour).padStart(2, '0')}:00:00${OFFSET.slice(0, 3)}:${OFFSET.slice(3)}`).toISOString();
+}
+
+function workoutXml({ activity, startStamp, endStamp, durationMinutes, distanceKm, energyKcal }) {
+  const distanceAttrs = distanceKm === undefined ? '' : ` totalDistance="${distanceKm}" totalDistanceUnit="km"`;
+  return `  <Workout workoutActivityType="${activity}" sourceName="Synthetic Watch" duration="${durationMinutes}" durationUnit="min"${distanceAttrs} totalEnergyBurned="${energyKcal}" totalEnergyBurnedUnit="kcal" creationDate="${startStamp}" startDate="${startStamp}" endDate="${endStamp}"/>\n`;
+}
+
+/**
+ * 128 workouts — far past the default page of 50 — with exactly known totals:
+ * 120 runs of 60 min / 5 km / 500 kcal, then 8 yoga sessions of 30 min / 100 kcal.
+ * A first page of 50 sums to 25.000 kcal; the truth is 60.800 kcal.
+ */
+function buildWorkoutExport() {
+  const base = '2026-01-01';
+  const runs = 120;
+  const yoga = 8;
+  const yogaStartDay = 200;
+  let xml = XML_HEADER;
+
+  for (let index = 0; index < runs; index += 1) {
+    xml += workoutXml({
+      activity: 'HKWorkoutActivityTypeRunning',
+      startStamp: dayStamp(base, index, 6),
+      endStamp: dayStamp(base, index, 7),
+      durationMinutes: 60,
+      distanceKm: 5,
+      energyKcal: 500
+    });
+  }
+  for (let index = 0; index < yoga; index += 1) {
+    xml += workoutXml({
+      activity: 'HKWorkoutActivityTypeYoga',
+      startStamp: dayStamp(base, yogaStartDay + index, 18),
+      endStamp: dayStamp(base, yogaStartDay + index, 19),
+      durationMinutes: 30,
+      energyKcal: 100
+    });
+  }
+  xml += '</HealthData>\n';
+
+  // A 10-day window over the first runs only: matches fewer workouts than the limit,
+  // so nothing is truncated and the totals must still be exact.
+  const windowDays = 10;
+  return {
+    xml,
+    truth: {
+      total: runs + yoga,
+      runs,
+      yoga,
+      total_energy_kcal: runs * 500 + yoga * 100,
+      total_duration_minutes: runs * 60 + yoga * 30,
+      total_distance: runs * 5,
+      first_iso: dayIso(base, 0, 6),
+      last_iso: dayIso(base, yogaStartDay + yoga - 1, 19),
+      // What the defect reported instead: the first page's sums, presented as the period's.
+      first_page_energy_kcal: 50 * 500,
+      window: {
+        start: `${dayFrom(base, 0)}T00:00:00${OFFSET.slice(0, 3)}:${OFFSET.slice(3)}`,
+        end: `${dayFrom(base, windowDays - 1)}T23:59:59${OFFSET.slice(0, 3)}:${OFFSET.slice(3)}`,
+        count: windowDays,
+        total_energy_kcal: windowDays * 500,
+        total_distance: windowDays * 5
+      }
+    }
+  };
+}
+
 /** One synthetic day large enough to overflow Math.min(...values). */
 function buildLargeDayExport() {
   const date = '2026-06-01';
@@ -131,14 +217,18 @@ function buildLargeDayExport() {
 const workdir = mkdtempSync(join(tmpdir(), 'apple-health-aggregate-'));
 const truncation = buildTruncationExport();
 const largeDay = buildLargeDayExport();
+const workoutSet = buildWorkoutExport();
 // The connector only accepts a file literally named export.xml (or a directory/zip
 // holding one), so each synthetic export gets its own folder.
 const truncationPath = join(workdir, 'truncation', 'export.xml');
 const largeDayPath = join(workdir, 'large-day', 'export.xml');
+const workoutPath = join(workdir, 'workouts', 'export.xml');
 mkdirSync(join(workdir, 'truncation'), { recursive: true });
 mkdirSync(join(workdir, 'large-day'), { recursive: true });
+mkdirSync(join(workdir, 'workouts'), { recursive: true });
 writeFileSync(truncationPath, truncation.xml);
 writeFileSync(largeDayPath, largeDay.xml);
+writeFileSync(workoutPath, workoutSet.xml);
 
 function callList(client, args) {
   return client.callTool({ name: 'apple_health_list_records', arguments: args });
@@ -224,6 +314,107 @@ try {
     );
   });
 
+  await withServer(workoutPath, async (client) => {
+    const callWorkouts = (args) => client.callTool({ name: 'apple_health_list_workouts', arguments: args });
+
+    // Default call: no limit, no privacy_mode — exactly how an agent asks
+    // "how much did I train this period?".
+    const summary = await callWorkouts({ response_format: 'json' });
+    const payload = summary.structuredContent;
+    const aggregate = payload?.aggregate;
+
+    assert.equal(payload?.privacy_mode, 'summary', 'default privacy mode should stay summary');
+    assert.notEqual(
+      aggregate?.total_energy_kcal,
+      workoutSet.truth.first_page_energy_kcal,
+      'total_energy_kcal must not be the first page total presented as the period total'
+    );
+    assert.equal(
+      aggregate?.total_energy_kcal,
+      workoutSet.truth.total_energy_kcal,
+      `total_energy_kcal must sum every matching workout (${workoutSet.truth.total_energy_kcal})`
+    );
+    assert.equal(
+      aggregate?.total_duration_minutes,
+      workoutSet.truth.total_duration_minutes,
+      'total_duration_minutes must sum every matching workout'
+    );
+    assert.equal(aggregate?.total_distance, workoutSet.truth.total_distance, 'total_distance must sum every matching workout');
+    assert.equal(
+      aggregate?.count_by_activity?.HKWorkoutActivityTypeRunning,
+      workoutSet.truth.runs,
+      'count_by_activity must count every matching workout, not the page'
+    );
+    assert.equal(aggregate?.count_by_activity?.HKWorkoutActivityTypeYoga, workoutSet.truth.yoga, 'activities outside the page must still be counted');
+    assert.equal(aggregate?.workout_count, workoutSet.truth.total, 'workout_count must state how many workouts the aggregate covers');
+    assert.equal(aggregate?.date_range?.first, workoutSet.truth.first_iso, 'date_range.first must be the true earliest workout timestamp');
+    assert.equal(aggregate?.date_range?.last, workoutSet.truth.last_iso, 'date_range.last must be the true latest workout timestamp, not the last one on the page');
+    assert.deepEqual(aggregate?.distance_units, ['km'], 'distance_units must reflect the whole match set');
+
+    // Truncation must be announced, not inferred.
+    assert.equal(payload?.truncated, true, 'truncated must be true when the workout listing was capped by limit');
+    assert.equal(payload?.limit_applied, 50, 'limit_applied must report the effective limit');
+    assert.equal(payload?.matched_count, workoutSet.truth.total, 'matched_count must report every workout matching the filter');
+    assert.equal(payload?.aggregate_scope, 'all_matching_workouts', 'aggregate_scope must state that the aggregate covers the full filtered set');
+
+    // Markdown is the default response_format — the corrected totals must survive there.
+    const markdown = await callWorkouts({});
+    const text = markdown.content?.map((item) => item.text ?? '').join('\n') ?? '';
+    assert.match(text, /truncated/i, 'markdown output must disclose truncation');
+    assert.match(
+      text,
+      new RegExp(`aggregate_total_energy_kcal\\*\\*: ${workoutSet.truth.total_energy_kcal}`),
+      'markdown output must carry the true energy total, not the first page total'
+    );
+    assert.match(
+      text,
+      new RegExp(`aggregate_total_distance\\*\\*: ${workoutSet.truth.total_distance}`),
+      'markdown output must carry the true distance total'
+    );
+
+    // Raw mode still pages the list, and still reports the truth about the cap.
+    const raw = await callWorkouts({ privacy_mode: 'raw', response_format: 'json' });
+    assert.equal(raw.structuredContent?.workouts?.length, 50, 'raw mode must still respect limit');
+    assert.equal(raw.structuredContent?.count, 50, 'count must describe the returned listing');
+    assert.equal(raw.structuredContent?.truncated, true, 'raw mode must disclose truncation');
+
+    // Structured mode pages the list too, and discloses the cap the same way.
+    const structured = await callWorkouts({ privacy_mode: 'structured', limit: 20, response_format: 'json' });
+    assert.equal(structured.structuredContent?.workouts?.length, 20, 'structured mode must respect an explicit limit');
+    assert.equal(structured.structuredContent?.truncated, true, 'structured mode must disclose truncation');
+    assert.equal(structured.structuredContent?.limit_applied, 20, 'limit_applied must echo the explicit limit');
+
+    // Explicit limit above the match count: nothing is truncated, totals unchanged.
+    const whole = await callWorkouts({ limit: 200, response_format: 'json' });
+    assert.equal(whole.structuredContent?.truncated, false, 'truncated must be false when every match fits in the page');
+    assert.equal(whole.structuredContent?.matched_count, workoutSet.truth.total, 'matched_count must be exact when nothing is truncated');
+    assert.equal(
+      whole.structuredContent?.aggregate?.total_energy_kcal,
+      workoutSet.truth.total_energy_kcal,
+      'totals must be identical whether or not the page held every workout'
+    );
+
+    // A date window narrower than the limit: the aggregate must follow the filter,
+    // proving the fix did not simply start summing the whole export.
+    const windowed = await callWorkouts({
+      start: workoutSet.truth.window.start,
+      end: workoutSet.truth.window.end,
+      response_format: 'json'
+    });
+    assert.equal(windowed.structuredContent?.truncated, false, 'a 10-workout window must not be truncated under a limit of 50');
+    assert.equal(windowed.structuredContent?.matched_count, workoutSet.truth.window.count, 'matched_count must respect the date filter');
+    assert.equal(
+      windowed.structuredContent?.aggregate?.total_energy_kcal,
+      workoutSet.truth.window.total_energy_kcal,
+      'aggregate must cover the filtered window only, not the whole export'
+    );
+    assert.equal(
+      windowed.structuredContent?.aggregate?.total_distance,
+      workoutSet.truth.window.total_distance,
+      'aggregate distance must respect the date filter'
+    );
+  });
+
   await withServer(largeDayPath, async (client) => {
     const daily = await client.callTool({
       name: 'apple_health_daily_summary',
@@ -240,6 +431,8 @@ try {
     aggregate_truncation: true,
     records_scanned: truncation.truth.total,
     true_min: truncation.truth.min,
+    workouts_scanned: workoutSet.truth.total,
+    true_total_energy_kcal: workoutSet.truth.total_energy_kcal,
     large_day_records: largeDay.truth.total
   }, null, 2));
 } finally {

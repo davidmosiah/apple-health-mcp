@@ -5,7 +5,12 @@ import sax from "sax";
 import yauzl from "yauzl";
 import { DEFAULT_LIMIT, MAX_LIMIT } from "../constants.js";
 import type { AppleHealthRecord, AppleHealthWorkout, AppleHealthWorkoutEvent } from "../types.js";
-import { createRecordAggregator, type RecordAggregateResult } from "./privacy.js";
+import {
+  createRecordAggregator,
+  createWorkoutAggregator,
+  type RecordAggregateResult,
+  type WorkoutAggregateResult
+} from "./privacy.js";
 import { parseFlexibleDate } from "./time.js";
 import {
   getLastParsedAt,
@@ -72,6 +77,33 @@ export interface WorkoutQuery {
   start?: string;
   end?: string;
   limit?: number;
+}
+
+export interface WorkoutScanQuery extends WorkoutQuery {
+  /**
+   * When true, keep scanning past `limit` and accumulate totals over every workout
+   * matching the filter. The returned workout list is still capped by `limit`.
+   */
+  aggregate?: boolean;
+  /** Timezone used for the aggregate's date_range day labels. */
+  timezone?: string;
+}
+
+export interface WorkoutScanResult {
+  /** At most `limit` workouts — the page the caller asked for. */
+  workouts: AppleHealthWorkout[];
+  /** Effective limit after clamping to [1, MAX_LIMIT]. */
+  limit: number;
+  /** True when more workouts matched the filter than the page could hold. */
+  truncated: boolean;
+  /**
+   * Exact number of workouts matching the filter. Undefined when the scan stopped
+   * early (no aggregate requested and the page filled up), because the true total
+   * was never counted.
+   */
+  matched_count?: number;
+  /** Present only when `aggregate` was requested; covers every matching workout. */
+  aggregate?: WorkoutAggregateResult;
 }
 
 export interface SnapshotQuery {
@@ -271,22 +303,55 @@ export async function scanRecords(query: RecordScanQuery): Promise<RecordScanRes
 }
 
 export async function listWorkouts(query: WorkoutQuery): Promise<AppleHealthWorkout[]> {
+  const scan = await scanWorkouts(query);
+  return scan.workouts;
+}
+
+/**
+ * Scan the export once and return a bounded page of workouts plus honest metadata
+ * about the whole match set.
+ *
+ * Same contract as scanRecords: `limit` caps the returned LIST only, and when
+ * `aggregate` is true the scan keeps running past the cap so `aggregate`/`matched_count`
+ * describe the queried set. This matters more for workouts than for records because the
+ * workout aggregate is made of sums — energy, duration, distance — so aggregating only
+ * the first page answers "how far did I run this month" with a number that is simply
+ * too small, with nothing in the payload to reveal it.
+ */
+export async function scanWorkouts(query: WorkoutScanQuery): Promise<WorkoutScanResult> {
   const limit = normalizeLimit(query.limit);
   const location = await inspectExportLocation(query.exportPath);
   if (!location.exists) throw new Error(location.note ?? "Apple Health export not found.");
   const start = query.start ? parseAppleDate(query.start) : undefined;
   const end = query.end ? parseAppleDate(query.end) : undefined;
   const workouts: AppleHealthWorkout[] = [];
+  const aggregator = query.aggregate === true ? createWorkoutAggregator() : undefined;
 
+  let matched = 0;
+  let scanCompleted = true;
   await parseExportEntities(location, {
     onWorkout(workout) {
       if (!overlaps(workout.startDate, workout.endDate, start, end)) return false;
-      workouts.push(workout);
-      return workouts.length >= limit;
+      matched += 1;
+      aggregator?.add(workout);
+      if (workouts.length < limit) {
+        workouts.push(workout);
+        return false;
+      }
+      if (aggregator) return false;
+      // No aggregate requested: one extra match is enough to know the list was cut.
+      scanCompleted = false;
+      return true;
     }
   });
 
-  return workouts;
+  return {
+    workouts,
+    limit,
+    truncated: matched > workouts.length,
+    matched_count: scanCompleted ? matched : undefined,
+    aggregate: aggregator?.finish(query.timezone)
+  };
 }
 
 export async function getExportSnapshot(query: SnapshotQuery): Promise<AppleHealthSnapshot> {

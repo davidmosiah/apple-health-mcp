@@ -16,7 +16,7 @@ import { buildPrivacyAudit } from "../services/audit.js";
 import { buildCapabilities } from "../services/capabilities.js";
 import { getConfig } from "../services/config.js";
 import { buildConnectionStatus } from "../services/connection-status.js";
-import { listWorkouts, scanRecords } from "../services/apple-health-export.js";
+import { scanRecords, scanWorkouts } from "../services/apple-health-export.js";
 import { bulletList, makeError, makeResponse } from "../services/format.js";
 import {
   buildProfileSummary,
@@ -290,22 +290,43 @@ export function registerAppleHealthTools(server: McpServer): void {
 
   server.registerTool("apple_health_list_workouts", {
     title: "List Apple Health Workouts",
-    description: "List bounded workout records from a local Apple Health export.xml.",
+    description: "List bounded workouts from a local Apple Health export.xml. `limit` caps the returned LIST only: in summary privacy mode the `aggregate` block (total_energy_kcal/total_duration_minutes/total_distance/count_by_activity/date_range) is computed over every workout matching the filter, and `truncated`/`limit_applied`/`matched_count` say whether the list itself was cut.",
     inputSchema: WorkoutListInputSchema.shape,
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true }
   }, async (params) => {
     try {
       const config = getConfig();
-      const workouts = await listWorkouts({ exportPath: config.exportPath, start: params.start, end: params.end, limit: params.limit });
       const privacyMode = params.privacy_mode ?? config.privacyMode;
+      const scan = await scanWorkouts({
+        exportPath: config.exportPath,
+        start: params.start,
+        end: params.end,
+        limit: params.limit,
+        // Summary mode reports totals instead of workouts, and totals that only cover the
+        // page under `limit` understate the period they claim to describe.
+        aggregate: privacyMode === "summary",
+        timezone: config.timezone
+      });
       const output = {
         source: "apple_health_export",
         privacy_mode: privacyMode,
-        count: workouts.length,
-        ...workoutPrivacyView(workouts, privacyMode, config.timezone)
+        count: scan.workouts.length,
+        limit_applied: scan.limit,
+        truncated: scan.truncated,
+        matched_count: scan.matched_count,
+        ...workoutPrivacyView(scan.workouts, privacyMode, config.timezone, scan.aggregate)
       };
       return makeResponse(output, params.response_format, bulletList("Apple Health Workouts", {
-        count: workouts.length,
+        count: scan.workouts.length,
+        limit_applied: scan.limit,
+        truncated: scan.truncated,
+        matched_count: scan.matched_count ?? "unknown (list capped by limit)",
+        aggregate_scope: scan.aggregate ? "all_matching_workouts" : "not_requested",
+        // Markdown is the default response_format, so the corrected totals have to be
+        // readable here too, not only in structuredContent.
+        aggregate_total_energy_kcal: scan.aggregate?.total_energy_kcal,
+        aggregate_total_duration_minutes: scan.aggregate?.total_duration_minutes,
+        aggregate_total_distance: scan.aggregate?.total_distance,
         source: "apple_health_export",
         privacy_mode: privacyMode
       }));

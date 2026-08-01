@@ -1,6 +1,6 @@
 {
   "name": "apple-health-mcp-unofficial",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "Unofficial local-first MCP server for Apple Health export data.",
   "type": "module",
   "bin": {

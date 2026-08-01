@@ -31,6 +31,30 @@ export interface RecordAggregator {
   finish(timezone?: string): RecordAggregateResult;
 }
 
+export interface WorkoutAggregateResult {
+  count_by_activity: Record<string, number>;
+  date_range?: {
+    first: string;
+    last: string;
+    first_date?: string;
+    last_date?: string;
+  };
+  total_duration_minutes?: number;
+  total_distance?: number;
+  distance_units: string[];
+  total_energy_kcal?: number;
+  /** How many workouts this aggregate was computed from. */
+  workout_count: number;
+}
+
+/**
+ * Streaming counterpart of RecordAggregator for workouts. See createWorkoutAggregator.
+ */
+export interface WorkoutAggregator {
+  add(workout: AppleHealthWorkout): void;
+  finish(timezone?: string): WorkoutAggregateResult;
+}
+
 export function createRecordAggregator(): RecordAggregator {
   const countByType = new Map<string, number>();
   const units = new Set<string>();
@@ -125,7 +149,17 @@ export function recordPrivacyView(
   };
 }
 
-export function workoutPrivacyView(workouts: AppleHealthWorkout[], mode: PrivacyMode, timezone = "UTC") {
+export function workoutPrivacyView(
+  workouts: AppleHealthWorkout[],
+  mode: PrivacyMode,
+  timezone = "UTC",
+  /**
+   * Aggregate computed over every workout matching the query, not only the ones that
+   * survived `limit`. When omitted, the aggregate falls back to the workouts passed in
+   * and says so via `aggregate_scope`.
+   */
+  fullSetAggregate?: WorkoutAggregateResult
+) {
   if (mode === "raw") {
     return {
       workouts,
@@ -154,8 +188,11 @@ export function workoutPrivacyView(workouts: AppleHealthWorkout[], mode: Privacy
 
   return {
     workouts: [],
-    aggregate: workoutAggregate(workouts, timezone),
-    disclosure: "summary_mode_omits_individual_workouts"
+    aggregate: fullSetAggregate ?? workoutAggregate(workouts, timezone),
+    aggregate_scope: fullSetAggregate ? "all_matching_workouts" : "provided_workouts_only",
+    disclosure: fullSetAggregate
+      ? "summary_mode_omits_individual_workouts_aggregate_covers_all_matching_workouts"
+      : "summary_mode_omits_individual_workouts"
   };
 }
 
@@ -170,14 +207,65 @@ export function recordAggregate(records: AppleHealthRecord[], timezone = "UTC"):
   return aggregator.finish(timezone);
 }
 
-export function workoutAggregate(workouts: AppleHealthWorkout[], timezone = "UTC") {
+/**
+ * Aggregate over exactly the workouts handed in. Callers that applied a `limit` must
+ * NOT use this to describe the queried set — its totals are sums, so a capped input
+ * understates "how far did I run this month" without any hint that it did. Use a
+ * WorkoutAggregator fed by the full scan instead (see createWorkoutAggregator).
+ */
+export function workoutAggregate(workouts: AppleHealthWorkout[], timezone = "UTC"): WorkoutAggregateResult {
+  const aggregator = createWorkoutAggregator();
+  for (const workout of workouts) aggregator.add(workout);
+  return aggregator.finish(timezone);
+}
+
+/**
+ * Streaming workout aggregator, the workout twin of createRecordAggregator. It exists
+ * for the same reason: totals computed from a page that was capped by `limit` are not
+ * the totals of the queried set, and for workouts the damage is worse — these are sums
+ * (energy, duration, distance), so the answer is silently too small rather than merely
+ * unrepresentative.
+ */
+export function createWorkoutAggregator(): WorkoutAggregator {
+  const countByActivity = new Map<string, number>();
+  const distanceUnits = new Set<string>();
+  let earliestMs: number | undefined;
+  let latestMs: number | undefined;
+  let totalDurationMinutes = 0;
+  let totalDistance = 0;
+  let totalEnergy = 0;
+  let seen = 0;
+
   return {
-    count_by_activity: countBy(workouts, (workout) => workout.workoutActivityType || "unknown"),
-    date_range: dateRange(workouts.flatMap((workout) => [workout.startDate, workout.endDate]), timezone),
-    total_duration_minutes: round(workouts.reduce((sum, workout) => sum + durationMinutes(workout), 0)),
-    total_distance: round(workouts.reduce((sum, workout) => sum + (workout.totalDistance ?? 0), 0)),
-    distance_units: Array.from(new Set(workouts.map((workout) => workout.totalDistanceUnit).filter((unit): unit is string => Boolean(unit)))).sort(),
-    total_energy_kcal: round(workouts.reduce((sum, workout) => sum + (workout.totalEnergyBurned ?? 0), 0))
+    add(workout: AppleHealthWorkout) {
+      seen += 1;
+      const activity = workout.workoutActivityType || "unknown";
+      countByActivity.set(activity, (countByActivity.get(activity) ?? 0) + 1);
+      if (workout.totalDistanceUnit) distanceUnits.add(workout.totalDistanceUnit);
+      for (const value of [workout.startDate, workout.endDate]) {
+        const parsed = parseFlexibleDate(value);
+        if (!parsed) continue;
+        const ms = parsed.getTime();
+        if (earliestMs === undefined || ms < earliestMs) earliestMs = ms;
+        if (latestMs === undefined || ms > latestMs) latestMs = ms;
+      }
+      totalDurationMinutes += durationMinutes(workout);
+      totalDistance += workout.totalDistance ?? 0;
+      totalEnergy += workout.totalEnergyBurned ?? 0;
+    },
+    finish(timezone = "UTC"): WorkoutAggregateResult {
+      return {
+        count_by_activity: Object.fromEntries([...countByActivity].sort(([left], [right]) => left.localeCompare(right))),
+        date_range: earliestMs === undefined || latestMs === undefined
+          ? undefined
+          : buildDateRange(new Date(earliestMs), new Date(latestMs), timezone),
+        total_duration_minutes: round(totalDurationMinutes),
+        total_distance: round(totalDistance),
+        distance_units: [...distanceUnits].sort(),
+        total_energy_kcal: round(totalEnergy),
+        workout_count: seen
+      };
+    }
   };
 }
 
@@ -197,16 +285,6 @@ function buildDateRange(first: Date, last: Date, timezone: string) {
     first_date: dateOnlyInTimezone(first.toISOString(), timezone),
     last_date: dateOnlyInTimezone(last.toISOString(), timezone)
   };
-}
-
-function countBy<T>(items: T[], getKey: (item: T) => string): Record<string, number> {
-  return Object.fromEntries(
-    [...items.reduce((map, item) => {
-      const key = getKey(item);
-      map.set(key, (map.get(key) ?? 0) + 1);
-      return map;
-    }, new Map<string, number>())].sort(([left], [right]) => left.localeCompare(right))
-  );
 }
 
 function durationMinutes(workout: AppleHealthWorkout): number {
