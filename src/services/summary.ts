@@ -290,14 +290,17 @@ function averageValues(values: number[]): number | undefined {
   return round(values.reduce((sum, value) => sum + value, 0) / values.length);
 }
 
+// Reduce, not Math.min(...values): spreading a day's worth of high-frequency samples
+// (~120k+ heart-rate values) exceeds the argument limit and throws RangeError,
+// which surfaced to the agent as "Maximum call stack size exceeded" instead of a summary.
 function minValue(values: number[]): number | undefined {
   if (values.length === 0) return undefined;
-  return round(Math.min(...values));
+  return round(values.reduce((min, value) => (value < min ? value : min), values[0]));
 }
 
 function maxValue(values: number[]): number | undefined {
   if (values.length === 0) return undefined;
-  return round(Math.max(...values));
+  return round(values.reduce((max, value) => (value > max ? value : max), values[0]));
 }
 
 function direction(before: number | undefined, after: number | undefined): "up" | "down" | "flat" | "unknown" {

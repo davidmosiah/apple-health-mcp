@@ -1,3 +1,21 @@
+## 0.6.0 - 2026-08-01
+
+### Fixed
+
+- **`apple_health_list_records` reported statistics of the first page as if they described the whole query.** The `aggregate` block (`numeric.min/max/sum/average/count`, `count_by_type`, `date_range`, `units`) was computed only over the records that survived `limit` — 50 by default — while nothing in the payload said so. An agent asking for the minimum heart rate of a range with 800 matching records got the minimum of the 50 oldest ones: measured on a synthetic 800-record fixture, the tool answered `min: 120` when the true minimum was `85`, and `max: 159` when the true maximum was `175`. Wrong by construction, silently, on the default call with zero flags. The scan now keeps streaming past the cap and accumulates running statistics over **every** record matching the filter, while still returning at most `limit` records.
+- **Daily/weekly summaries crashed on high-frequency days.** `Math.min(...values)` / `Math.max(...values)` in `summary.ts` exceeded the JS argument limit past ~120k values, so a day with that many heart-rate samples returned `Error: Maximum call stack size exceeded` instead of `heart.min_bpm` / `heart.max_bpm`. Both are now folds, and the same spread was removed from the record aggregator.
+
+### Added
+
+- **Truncation is now explicit in `apple_health_list_records`**: `limit_applied`, `truncated` (true when more records matched than the page could hold), `matched_count` (exact total matching the filter; omitted only when the scan stopped early because no aggregate was requested) and `aggregate_scope: "all_matching_records"`. `count` keeps its old meaning — the number of records in the returned listing. The markdown output (the default `response_format`) now carries the truncation flags plus `aggregate_min`/`aggregate_max`/`aggregate_average`, so the corrected numbers are visible without asking for JSON.
+- `disclosure` in summary mode now reads `summary_mode_omits_individual_records_aggregate_covers_all_matching_records` when the aggregate came from the full scan.
+- **`scanRecords()`** in `services/apple-health-export.ts` and **`createRecordAggregator()`** in `services/privacy.ts` — the streaming primitives behind the fix. `listRecords()` keeps its old signature and behavior.
+- Regression gate `npm run test:aggregate` (`scripts/aggregate-truncation-test.mjs`), wired into `npm test`. It builds a synthetic 800-record export with the true min planted at index 750 and the true max at index 780 (both past the default limit), plus a synthetic 130k-record day for the `RangeError`. Both assertions fail on 0.5.1.
+
+### Note
+
+- The incremental cursor (`incremental_cache: true`) still only advances across records the caller actually received, so aggregating past the page never causes records to be skipped on the next call.
+
 ## 0.5.1 - 2026-07-30
 
 ### Added / Fixed

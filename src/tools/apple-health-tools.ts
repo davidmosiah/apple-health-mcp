@@ -16,7 +16,7 @@ import { buildPrivacyAudit } from "../services/audit.js";
 import { buildCapabilities } from "../services/capabilities.js";
 import { getConfig } from "../services/config.js";
 import { buildConnectionStatus } from "../services/connection-status.js";
-import { listRecords, listWorkouts } from "../services/apple-health-export.js";
+import { listWorkouts, scanRecords } from "../services/apple-health-export.js";
 import { bulletList, makeError, makeResponse } from "../services/format.js";
 import {
   buildProfileSummary,
@@ -239,24 +239,47 @@ export function registerAppleHealthTools(server: McpServer): void {
 
   server.registerTool("apple_health_list_records", {
     title: "List Apple Health Records",
-    description: "List bounded records from a local Apple Health export.xml. Use type/start/end filters to keep output small.",
+    description: "List bounded records from a local Apple Health export.xml. Use type/start/end filters to keep output small. `limit` caps the returned LIST only: in summary privacy mode the `aggregate` block (min/max/sum/average/count/date_range) is computed over every record matching the filter, and `truncated`/`limit_applied`/`matched_count` say whether the list itself was cut.",
     inputSchema: RecordListInputSchema.shape,
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true }
   }, async (params) => {
     try {
       const config = getConfig();
-      const records = await listRecords({ exportPath: config.exportPath, type: params.type, start: params.start, end: params.end, limit: params.limit, useIncrementalCache: params.incremental_cache === true });
       const privacyMode = params.privacy_mode ?? config.privacyMode;
+      const scan = await scanRecords({
+        exportPath: config.exportPath,
+        type: params.type,
+        start: params.start,
+        end: params.end,
+        limit: params.limit,
+        useIncrementalCache: params.incremental_cache === true,
+        // Summary mode reports statistics instead of records, so the statistics must
+        // describe every matching record, not just the page that fit under `limit`.
+        aggregate: privacyMode === "summary",
+        timezone: config.timezone
+      });
       const output = {
         source: "apple_health_export",
         type: params.type,
         privacy_mode: privacyMode,
-        count: records.length,
-        ...recordPrivacyView(records, privacyMode, config.timezone)
+        count: scan.records.length,
+        limit_applied: scan.limit,
+        truncated: scan.truncated,
+        matched_count: scan.matched_count,
+        ...recordPrivacyView(scan.records, privacyMode, config.timezone, scan.aggregate)
       };
       return makeResponse(output, params.response_format, bulletList("Apple Health Records", {
         type: params.type ?? "any",
-        count: records.length,
+        count: scan.records.length,
+        limit_applied: scan.limit,
+        truncated: scan.truncated,
+        matched_count: scan.matched_count ?? "unknown (list capped by limit)",
+        aggregate_scope: scan.aggregate ? "all_matching_records" : "not_requested",
+        // The corrected statistics must be readable in markdown too, not only in
+        // structuredContent — markdown is the default response_format.
+        aggregate_min: scan.aggregate?.numeric?.min,
+        aggregate_max: scan.aggregate?.numeric?.max,
+        aggregate_average: scan.aggregate?.numeric?.average,
         source: "apple_health_export",
         privacy_mode: privacyMode
       }));

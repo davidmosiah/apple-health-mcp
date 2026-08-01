@@ -159,7 +159,7 @@ This package parses Apple Health exports from the Health app. When this README s
 
 **Records**
 
-- `apple_health_list_records` — bounded records by `type` (e.g. `HKQuantityTypeIdentifierStepCount`), `start`, `end`, `limit`
+- `apple_health_list_records` — bounded records by `type` (e.g. `HKQuantityTypeIdentifierStepCount`), `start`, `end`, `limit`. `limit` caps the returned **list** only: in the default `summary` privacy mode the `aggregate` block (min/max/sum/average/count/date_range) is computed over every record matching the filter, and `truncated` / `limit_applied` / `matched_count` tell you whether the list itself was cut
 - `apple_health_list_workouts` — bounded workout records
 
 **Keeping data fresh**

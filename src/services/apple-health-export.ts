@@ -5,6 +5,7 @@ import sax from "sax";
 import yauzl from "yauzl";
 import { DEFAULT_LIMIT, MAX_LIMIT } from "../constants.js";
 import type { AppleHealthRecord, AppleHealthWorkout, AppleHealthWorkoutEvent } from "../types.js";
+import { createRecordAggregator, type RecordAggregateResult } from "./privacy.js";
 import { parseFlexibleDate } from "./time.js";
 import {
   getLastParsedAt,
@@ -37,6 +38,33 @@ export interface RecordQuery {
    * cache auto-invalidates when the export file mtime changes.
    */
   useIncrementalCache?: boolean;
+}
+
+export interface RecordScanQuery extends RecordQuery {
+  /**
+   * When true, keep scanning past `limit` and accumulate statistics over every record
+   * matching the filter. The returned record list is still capped by `limit`.
+   */
+  aggregate?: boolean;
+  /** Timezone used for the aggregate's date_range day labels. */
+  timezone?: string;
+}
+
+export interface RecordScanResult {
+  /** At most `limit` records — the page the caller asked for. */
+  records: AppleHealthRecord[];
+  /** Effective limit after clamping to [1, MAX_LIMIT]. */
+  limit: number;
+  /** True when more records matched the filter than the page could hold. */
+  truncated: boolean;
+  /**
+   * Exact number of records matching the filter. Undefined when the scan stopped
+   * early (no aggregate requested and the page filled up), because the true total
+   * was never counted.
+   */
+  matched_count?: number;
+  /** Present only when `aggregate` was requested; covers every matching record. */
+  aggregate?: RecordAggregateResult;
 }
 
 export interface WorkoutQuery {
@@ -159,12 +187,27 @@ export async function inspectExportLocation(inputPath?: string): Promise<ExportL
 }
 
 export async function listRecords(query: RecordQuery): Promise<AppleHealthRecord[]> {
+  const scan = await scanRecords(query);
+  return scan.records;
+}
+
+/**
+ * Scan the export once and return a bounded page of records plus honest metadata
+ * about the whole match set.
+ *
+ * `limit` caps the returned LIST only. When `aggregate` is true the scan keeps
+ * running past the cap and accumulates running statistics over every record that
+ * matches the filter, so `aggregate`/`matched_count` describe the queried set
+ * instead of the first page. Streaming keeps memory bounded to `limit` records.
+ */
+export async function scanRecords(query: RecordScanQuery): Promise<RecordScanResult> {
   const limit = normalizeLimit(query.limit);
   const location = await inspectExportLocation(query.exportPath);
   if (!location.exists) throw new Error(location.note ?? "Apple Health export not found.");
   const start = query.start ? parseAppleDate(query.start) : undefined;
   const end = query.end ? parseAppleDate(query.end) : undefined;
   const records: AppleHealthRecord[] = [];
+  const aggregator = query.aggregate === true ? createRecordAggregator() : undefined;
 
   let incrementalCutoff: Date | undefined;
   let useIncremental = false;
@@ -180,6 +223,8 @@ export async function listRecords(query: RecordQuery): Promise<AppleHealthRecord
   }
 
   let newestSeenMs = 0;
+  let matched = 0;
+  let scanCompleted = true;
   await parseExportEntities(location, {
     onRecord(record) {
       if (query.type && record.type !== query.type) return false;
@@ -188,12 +233,23 @@ export async function listRecords(query: RecordQuery): Promise<AppleHealthRecord
         const recordStart = parseAppleDate(record.startDate);
         if (recordStart && recordStart <= incrementalCutoff) return false;
       }
-      if (useIncremental) {
-        const ts = parseAppleDate(record.startDate);
-        if (ts && ts.getTime() > newestSeenMs) newestSeenMs = ts.getTime();
+      matched += 1;
+      aggregator?.add(record);
+      if (records.length < limit) {
+        // The incremental cursor may only advance across records the caller actually
+        // received; advancing it over aggregated-but-unreturned records would silently
+        // skip them on the next call.
+        if (useIncremental) {
+          const ts = parseAppleDate(record.startDate);
+          if (ts && ts.getTime() > newestSeenMs) newestSeenMs = ts.getTime();
+        }
+        records.push(record);
+        return false;
       }
-      records.push(record);
-      return records.length >= limit;
+      if (aggregator) return false;
+      // No aggregate requested: one extra match is enough to know the list was cut.
+      scanCompleted = false;
+      return true;
     }
   });
 
@@ -205,7 +261,13 @@ export async function listRecords(query: RecordQuery): Promise<AppleHealthRecord
     await saveCache(cache);
   }
 
-  return records;
+  return {
+    records,
+    limit,
+    truncated: matched > records.length,
+    matched_count: scanCompleted ? matched : undefined,
+    aggregate: aggregator?.finish(query.timezone)
+  };
 }
 
 export async function listWorkouts(query: WorkoutQuery): Promise<AppleHealthWorkout[]> {
