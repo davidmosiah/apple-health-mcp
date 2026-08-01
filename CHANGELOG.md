@@ -1,3 +1,21 @@
+## 0.7.1 - 2026-08-01
+
+### Added
+
+- **Repeating a list query no longer re-reads the whole export.** 0.6.0 and 0.7.0 bought correct aggregates by removing the early exit: in the default `summary` mode the scan must reach every matching entity, so `limit` stopped capping the work and each call streamed `export.xml` to EOF. That cost was real and was written down nowhere. Measured on synthetic exports with a warm page cache, one default `apple_health_list_records` call costs **~33 ms per MB** — ~3.0 s at 84 MB (353k records) and ~11.3 s at 336 MB (1.4M records), against ~1 ms for the same call in a paging mode. A cold first read of the 336 MB export took ~29 s. `apple_health_list_workouts` pays it in every mode, because an export holds too few `Workout` elements to fill even the default page. `scanRecords()`/`scanWorkouts()` now memoize completed scans in memory, so an identical repeat inside one session returns in **under a millisecond** instead of paying the full parse again. The first call still pays it — an aggregate over the whole match set cannot be computed any other way.
+- Regression gate `npm run test:scan-cache` (`scripts/scan-cache-test.mjs`), wired into `npm test`. It proves the memo without wall-clock assertions: each scenario rewrites the export with different values at the same byte length and restores the mtime, producing a file the cache key cannot tell apart, so a memoized scan returns the old values and an un-memoized one returns the new. The two memo scenarios fail on 0.7.0 (record aggregate `max` 99 where 10 is cached, workout `total_energy_kcal` 2700 where 300 is cached). It also covers mtime invalidation, key separation across different date windows, list-copy isolation, `clearSnapshotCache()` reach, and the incremental bypass below.
+
+### Changed
+
+- **What a list call costs is now stated where an agent will read it.** The `apple_health_list_records` and `apple_health_list_workouts` tool descriptions carry the per-MB figure, say that `type`/`start`/`end` do not shorten the scan (a match could sit in the last byte), and point at `privacy_mode: "structured"` / `"raw"` for a bounded page that stops at `limit`. README gains a "What a list call costs" table with the measured numbers.
+- `clearSnapshotCache()` now clears the scan memos as well as the snapshot cache. The watch/reimport path calls it after promoting a new export; without this, an export that landed on the same size and mtime would leave `list_records`/`list_workouts` answering from the previous file while the summaries had already moved on.
+- `snapshotCacheKey()` and the new scan keys share one `exportIdentity()` helper (path + size + mtime), so "this is a different export" is defined once instead of per cache.
+
+### Note
+
+- **Scans with `incremental_cache: true` are never memoized.** That path advances a persistent per-category cursor as a side effect, so its result depends on state the cache key cannot see — serving the second call from a memo would replay a page the caller already consumed. Covered by scenario 6 of the new gate.
+- Only scans that ran to completion are stored. A scan that stopped early never read the whole file, so it is already cheap and its `matched_count` is unknown.
+
 ## 0.7.0 - 2026-08-01
 
 ### Fixed

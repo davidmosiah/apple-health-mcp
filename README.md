@@ -166,6 +166,27 @@ This package parses Apple Health exports from the Health app. When this README s
 
 - `apple_health_reimport` — re-scan the watch folder (`APPLE_HEALTH_WATCH_PATH`) and promote the newest export, refreshing summaries; pass `check_only: true` to preview without promoting
 
+### What a list call costs
+
+`limit` bounds the **output**, not the work. In the default `summary` privacy mode the aggregate has to describe every matching record, so the scan cannot stop at the cap — it streams `export.xml` to the end. Narrowing with `type`, `start` or `end` does **not** shorten it: a match could still sit in the last byte, so the file is read in full either way.
+
+Measured on synthetic exports (Node 23, macOS, warm page cache), for one `apple_health_list_records` call in summary mode:
+
+| export.xml | first call, summary mode | same call repeated | same call, `privacy_mode: "raw"` |
+|---|---|---|---|
+| 84 MB (353k records) | ~3.0 s | <1 ms | ~1 ms |
+| 336 MB (1.4M records) | ~11.3 s | <1 ms | ~2 ms |
+
+Roughly **33 ms per MB**, linear in file size. A cold first read of a large export — before the OS has the file cached — costs noticeably more (~29 s was observed for 336 MB).
+
+Practical guidance:
+
+- **Identical repeat queries are free.** Results are memoized in memory per export file, keyed on path + size + mtime. Promoting a new export (or `apple_health_reimport`) invalidates them, so a stale export is never served.
+- **`apple_health_daily_summary`, `apple_health_weekly_summary` and `apple_health_data_inventory` share a separate snapshot cache** and were already paying one full parse; they are not affected by this.
+- **Need a quick page rather than statistics?** `privacy_mode: "structured"` or `"raw"` stops the scan at `limit` and returns in about a millisecond — at the cost of returning individual records instead of an aggregate.
+- **`apple_health_list_workouts` reaches the end of the file in every mode**, because workouts are sparse: an export rarely holds enough `Workout` elements to fill even the default page of 50.
+- `incremental_cache: true` is never memoized — it advances a persistent per-category cursor, so each call must actually run.
+
 ## Prompts
 
 - `apple_health_daily_review` — daily wellness review with non-medical framing

@@ -131,6 +131,24 @@ export interface AppleHealthSnapshot {
 const SNAPSHOT_CACHE = new Map<string, AppleHealthSnapshot>();
 const MAX_SNAPSHOT_CACHE_ENTRIES = 6;
 
+/**
+ * Memo for scans that had to read the export end to end.
+ *
+ * A summary-mode list call cannot stop at `limit` — the aggregate has to cover every
+ * matching entity — so it streams the whole file. That is the dominant cost of the
+ * call and it grows with the export: measured at roughly 33 ms per MB on synthetic
+ * exports (84 MB ≈ 3.0 s, 336 MB ≈ 11.3 s warm), against ~1 ms for the same call in
+ * a paging mode that stops at the cap. Repeating an identical question inside one
+ * session should not pay that twice.
+ *
+ * Keyed on the same export identity as SNAPSHOT_CACHE (path + size + mtime), so a new
+ * export invalidates both. Only completed scans are stored: a scan that stopped early
+ * never read the whole file, so it is already cheap and its `matched_count` is unknown.
+ */
+const RECORD_SCAN_CACHE = new Map<string, RecordScanResult>();
+const WORKOUT_SCAN_CACHE = new Map<string, WorkoutScanResult>();
+const MAX_SCAN_CACHE_ENTRIES = 12;
+
 export async function inspectExportLocation(inputPath?: string): Promise<ExportLocation> {
   if (!inputPath) {
     return {
@@ -231,11 +249,24 @@ export async function listRecords(query: RecordQuery): Promise<AppleHealthRecord
  * running past the cap and accumulates running statistics over every record that
  * matches the filter, so `aggregate`/`matched_count` describe the queried set
  * instead of the first page. Streaming keeps memory bounded to `limit` records.
+ *
+ * COST: `limit` does not bound the work. An aggregating scan reads the export to EOF
+ * every time — ~33 ms per MB of export.xml — and a `type`/`start`/`end` filter does not
+ * shorten it, because a match could still appear in the last byte. Identical repeat
+ * scans are served from RECORD_SCAN_CACHE; the first one always pays.
  */
 export async function scanRecords(query: RecordScanQuery): Promise<RecordScanResult> {
   const limit = normalizeLimit(query.limit);
   const location = await inspectExportLocation(query.exportPath);
   if (!location.exists) throw new Error(location.note ?? "Apple Health export not found.");
+  // The incremental path advances a persistent cursor as a side effect, so its result
+  // depends on state the key cannot see. Serving it from a memo would replay a page the
+  // caller already consumed. Never cached.
+  const cacheKey = query.useIncrementalCache === true ? undefined : recordScanCacheKey(location, query, limit);
+  if (cacheKey) {
+    const hit = RECORD_SCAN_CACHE.get(cacheKey);
+    if (hit) return cloneRecordScan(hit);
+  }
   const start = query.start ? parseAppleDate(query.start) : undefined;
   const end = query.end ? parseAppleDate(query.end) : undefined;
   const records: AppleHealthRecord[] = [];
@@ -293,13 +324,16 @@ export async function scanRecords(query: RecordScanQuery): Promise<RecordScanRes
     await saveCache(cache);
   }
 
-  return {
+  const result: RecordScanResult = {
     records,
     limit,
     truncated: matched > records.length,
     matched_count: scanCompleted ? matched : undefined,
     aggregate: aggregator?.finish(query.timezone)
   };
+  // Only a completed scan is worth memoizing: it is the one that read the whole file.
+  if (cacheKey && scanCompleted) rememberScan(RECORD_SCAN_CACHE, cacheKey, cloneRecordScan(result));
+  return result;
 }
 
 export async function listWorkouts(query: WorkoutQuery): Promise<AppleHealthWorkout[]> {
@@ -317,11 +351,19 @@ export async function listWorkouts(query: WorkoutQuery): Promise<AppleHealthWork
  * workout aggregate is made of sums — energy, duration, distance — so aggregating only
  * the first page answers "how far did I run this month" with a number that is simply
  * too small, with nothing in the payload to reveal it.
+ *
+ * COST: see scanRecords. Workout scans are the more expensive case in practice — an
+ * export holds far fewer Workout elements than Record elements, so even a non-aggregating
+ * workout scan usually never fills its page and runs to EOF anyway. Identical repeat
+ * scans are served from WORKOUT_SCAN_CACHE.
  */
 export async function scanWorkouts(query: WorkoutScanQuery): Promise<WorkoutScanResult> {
   const limit = normalizeLimit(query.limit);
   const location = await inspectExportLocation(query.exportPath);
   if (!location.exists) throw new Error(location.note ?? "Apple Health export not found.");
+  const cacheKey = workoutScanCacheKey(location, query, limit);
+  const hit = WORKOUT_SCAN_CACHE.get(cacheKey);
+  if (hit) return cloneWorkoutScan(hit);
   const start = query.start ? parseAppleDate(query.start) : undefined;
   const end = query.end ? parseAppleDate(query.end) : undefined;
   const workouts: AppleHealthWorkout[] = [];
@@ -345,13 +387,15 @@ export async function scanWorkouts(query: WorkoutScanQuery): Promise<WorkoutScan
     }
   });
 
-  return {
+  const result: WorkoutScanResult = {
     workouts,
     limit,
     truncated: matched > workouts.length,
     matched_count: scanCompleted ? matched : undefined,
     aggregate: aggregator?.finish(query.timezone)
   };
+  if (scanCompleted) rememberScan(WORKOUT_SCAN_CACHE, cacheKey, cloneWorkoutScan(result));
+  return result;
 }
 
 export async function getExportSnapshot(query: SnapshotQuery): Promise<AppleHealthSnapshot> {
@@ -538,14 +582,67 @@ function addMetadata(entity: AppleHealthRecord | AppleHealthWorkout | undefined,
   entity.metadata[key] = value;
 }
 
-function snapshotCacheKey(location: ExportLocation, query: SnapshotQuery): string {
+/**
+ * The one definition of "this is the same export file". Every parse cache keys on it,
+ * so promoting a new export invalidates all of them at once instead of one of them.
+ */
+function exportIdentity(location: ExportLocation): string {
   return [
     location.resolved_path ?? location.export_xml_path ?? location.input_path ?? "unknown",
     location.size_bytes ?? 0,
-    location.mtime_ms ?? 0,
-    query.start ?? "",
-    query.end ?? ""
+    location.mtime_ms ?? 0
   ].join("|");
+}
+
+function snapshotCacheKey(location: ExportLocation, query: SnapshotQuery): string {
+  return [exportIdentity(location), query.start ?? "", query.end ?? ""].join("|");
+}
+
+function recordScanCacheKey(location: ExportLocation, query: RecordScanQuery, limit: number): string {
+  return [
+    exportIdentity(location),
+    "records",
+    query.type ?? "",
+    query.start ?? "",
+    query.end ?? "",
+    limit,
+    query.aggregate === true ? "aggregate" : "page",
+    query.timezone ?? ""
+  ].join("|");
+}
+
+function workoutScanCacheKey(location: ExportLocation, query: WorkoutScanQuery, limit: number): string {
+  return [
+    exportIdentity(location),
+    "workouts",
+    query.start ?? "",
+    query.end ?? "",
+    limit,
+    query.aggregate === true ? "aggregate" : "page",
+    query.timezone ?? ""
+  ].join("|");
+}
+
+/**
+ * Copy the entity list on the way in and on the way out, so a caller mutating the array
+ * it received cannot corrupt what the next caller reads. The entities and the aggregate
+ * are shared: nothing in this codebase mutates them.
+ */
+function cloneRecordScan(scan: RecordScanResult): RecordScanResult {
+  return { ...scan, records: [...scan.records] };
+}
+
+function cloneWorkoutScan(scan: WorkoutScanResult): WorkoutScanResult {
+  return { ...scan, workouts: [...scan.workouts] };
+}
+
+function rememberScan<T>(cache: Map<string, T>, key: string, value: T): void {
+  cache.set(key, value);
+  while (cache.size > MAX_SCAN_CACHE_ENTRIES) {
+    const oldest = cache.keys().next().value;
+    if (!oldest) break;
+    cache.delete(oldest);
+  }
 }
 
 function cacheSnapshot(key: string, snapshot: AppleHealthSnapshot): void {
@@ -558,13 +655,18 @@ function cacheSnapshot(key: string, snapshot: AppleHealthSnapshot): void {
 }
 
 /**
- * Drop the in-memory snapshot cache so the next summary/inventory call re-parses
- * the export from disk. Call this after a reimport/promotion of a fresh export so
- * long-running transports (HTTP) immediately reflect the new data. Stdio one-shot
- * processes do not need this, but it is harmless there.
+ * Drop every in-memory parse cache — snapshots and scans — so the next summary,
+ * inventory or list call re-parses the export from disk. Call this after a
+ * reimport/promotion of a fresh export so long-running transports (HTTP) immediately
+ * reflect the new data. Stdio one-shot processes do not need this, but it is harmless
+ * there. The scan caches are cleared here too: promoting an export that happens to land
+ * on the same size and mtime would otherwise leave list_records/list_workouts serving
+ * the old file while the summaries had already moved on.
  */
 export function clearSnapshotCache(): void {
   SNAPSHOT_CACHE.clear();
+  RECORD_SCAN_CACHE.clear();
+  WORKOUT_SCAN_CACHE.clear();
 }
 
 async function openXmlStream(location: ExportLocation): Promise<Readable> {

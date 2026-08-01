@@ -239,7 +239,7 @@ export function registerAppleHealthTools(server: McpServer): void {
 
   server.registerTool("apple_health_list_records", {
     title: "List Apple Health Records",
-    description: "List bounded records from a local Apple Health export.xml. Use type/start/end filters to keep output small. `limit` caps the returned LIST only: in summary privacy mode the `aggregate` block (min/max/sum/average/count/date_range) is computed over every record matching the filter, and `truncated`/`limit_applied`/`matched_count` say whether the list itself was cut.",
+    description: "List bounded records from a local Apple Health export.xml. Use type/start/end filters to keep output small. `limit` caps the returned LIST only: in summary privacy mode (the default) the `aggregate` block (min/max/sum/average/count/date_range) is computed over every record matching the filter, and `truncated`/`limit_applied`/`matched_count` say whether the list itself was cut. COST: because the aggregate must cover every match, summary mode reads the whole export file on each new query — roughly 33 ms per MB of export.xml (~3 s for 84 MB, ~11 s for 336 MB), and type/start/end do not shorten it. Repeating an identical query is served from an in-memory cache and returns instantly. For a cheap bounded page with no full-file scan, pass privacy_mode 'structured' or 'raw', which stop at `limit`.",
     inputSchema: RecordListInputSchema.shape,
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true }
   }, async (params) => {
@@ -290,7 +290,7 @@ export function registerAppleHealthTools(server: McpServer): void {
 
   server.registerTool("apple_health_list_workouts", {
     title: "List Apple Health Workouts",
-    description: "List bounded workouts from a local Apple Health export.xml. `limit` caps the returned LIST only: in summary privacy mode the `aggregate` block (total_energy_kcal/total_duration_minutes/total_distance/count_by_activity/date_range) is computed over every workout matching the filter, and `truncated`/`limit_applied`/`matched_count` say whether the list itself was cut.",
+    description: "List bounded workouts from a local Apple Health export.xml. `limit` caps the returned LIST only: in summary privacy mode (the default) the `aggregate` block (total_energy_kcal/total_duration_minutes/total_distance/count_by_activity/date_range) is computed over every workout matching the filter, and `truncated`/`limit_applied`/`matched_count` say whether the list itself was cut. COST: this call reads the whole export file on each new query — roughly 33 ms per MB of export.xml (~3 s for 84 MB, ~11 s for 336 MB) — and start/end do not shorten it. Workouts are sparse in an export, so even non-summary modes usually reach the end of the file. Repeating an identical query is served from an in-memory cache and returns instantly.",
     inputSchema: WorkoutListInputSchema.shape,
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true }
   }, async (params) => {
