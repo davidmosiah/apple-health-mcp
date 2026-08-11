@@ -91,6 +91,8 @@ Now every time you export from your iPhone and drop the new `export.zip` (or `ex
 
 Then add this to your MCP client config:
 
+<!-- config-example -->
+
 ```json
 {
   "mcpServers": {
@@ -159,8 +161,8 @@ This package parses Apple Health exports from the Health app. When this README s
 
 **Records**
 
-- `apple_health_list_records` — bounded records by `type` (e.g. `HKQuantityTypeIdentifierStepCount`), `start`, `end`, `limit`. `limit` caps the returned **list** only: in the default `summary` privacy mode the `aggregate` block (min/max/sum/average/count/date_range) is computed over every record matching the filter, and `truncated` / `limit_applied` / `matched_count` tell you whether the list itself was cut
-- `apple_health_list_workouts` — bounded workouts by `start`, `end`, `limit`. Same contract: `limit` caps the returned **list** only, and in `summary` privacy mode the `aggregate` totals (`total_energy_kcal`, `total_duration_minutes`, `total_distance`, `count_by_activity`, `date_range`) cover every workout matching the filter, with `truncated` / `limit_applied` / `matched_count` reporting whether the list was cut
+- `apple_health_list_records` — bounded records by `type` (e.g. `HKQuantityTypeIdentifierStepCount`), `start`, `end`, `limit`. `limit` caps the returned **list** only: in the default `summary` privacy mode the `aggregate` block (<!-- record-aggregate-keys:start -->`count_by_type`, `units`, `date_range`, `numeric`<!-- record-aggregate-keys:end -->) is computed over every record matching the filter, and `truncated` / `limit_applied` / `matched_count` tell you whether the list itself was cut. The statistics live **under `numeric`** (`numeric.min` / `numeric.max` / `numeric.sum` / `numeric.average` / `numeric.count`), not at the top of `aggregate` — see [What a payload looks like](#what-a-payload-looks-like)
+- `apple_health_list_workouts` — bounded workouts by `start`, `end`, `limit`. Same contract: `limit` caps the returned **list** only, and in `summary` privacy mode the `aggregate` totals (<!-- workout-aggregate-keys:start -->`count_by_activity`, `date_range`, `total_duration_minutes`, `total_distance`, `distance_units`, `total_energy_kcal`, `workout_count`<!-- workout-aggregate-keys:end -->) cover every workout matching the filter, with `truncated` / `limit_applied` / `matched_count` reporting whether the list was cut
 
 **Keeping data fresh**
 
@@ -186,6 +188,73 @@ Practical guidance:
 - **Need a quick page rather than statistics?** `privacy_mode: "structured"` or `"raw"` stops the scan at `limit` and returns in about a millisecond — at the cost of returning individual records instead of an aggregate.
 - **`apple_health_list_workouts` reaches the end of the file in every mode**, because workouts are sparse: an export rarely holds enough `Workout` elements to fill even the default page of 50.
 - `incremental_cache: true` is never memoized — it advances a persistent per-category cursor, so each call must actually run.
+
+### What a payload looks like
+
+Synthetic values, real shape. `npm run test:readme-contract` calls the actual server against the repo fixture and fails if any key below stops existing — or if the server starts returning a key this section does not show.
+
+<!-- payload-example: apple_health_list_records {"type":"HKQuantityTypeIdentifierHeartRate","response_format":"json"} -->
+
+```json
+{
+  "source": "apple_health_export",
+  "type": "HKQuantityTypeIdentifierHeartRate",
+  "privacy_mode": "summary",
+  "count": 50,
+  "limit_applied": 50,
+  "truncated": true,
+  "matched_count": 2847,
+  "records": [],
+  "aggregate": {
+    "count_by_type": { "HKQuantityTypeIdentifierHeartRate": 2847 },
+    "units": ["count/min"],
+    "date_range": {
+      "first": "2026-04-01T03:12:00.000Z",
+      "last": "2026-04-30T23:41:00.000Z",
+      "first_date": "2026-04-01",
+      "last_date": "2026-04-30"
+    },
+    "numeric": { "count": 2847, "sum": 202137, "average": 71, "min": 48, "max": 174 }
+  },
+  "aggregate_scope": "all_matching_records",
+  "disclosure": "summary_mode_omits_individual_records_aggregate_covers_all_matching_records"
+}
+```
+
+`records` is empty in `summary` mode by design — the aggregate replaces the individual samples. `count` still reports how many records the scan paged in; `matched_count` is the full match set the aggregate covers.
+
+<!-- payload-example: apple_health_list_workouts {"response_format":"json"} -->
+
+```json
+{
+  "source": "apple_health_export",
+  "privacy_mode": "summary",
+  "count": 12,
+  "limit_applied": 50,
+  "truncated": false,
+  "matched_count": 12,
+  "workouts": [],
+  "aggregate": {
+    "count_by_activity": {
+      "HKWorkoutActivityTypeRunning": 8,
+      "HKWorkoutActivityTypeTraditionalStrengthTraining": 4
+    },
+    "date_range": {
+      "first": "2026-04-02T21:10:00.000Z",
+      "last": "2026-04-29T22:05:00.000Z",
+      "first_date": "2026-04-02",
+      "last_date": "2026-04-29"
+    },
+    "total_duration_minutes": 486.5,
+    "total_distance": 62.4,
+    "distance_units": ["km"],
+    "total_energy_kcal": 5820,
+    "workout_count": 12
+  },
+  "aggregate_scope": "all_matching_workouts",
+  "disclosure": "summary_mode_omits_individual_workouts_aggregate_covers_all_matching_workouts"
+}
+```
 
 ## Prompts
 
