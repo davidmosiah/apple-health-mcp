@@ -31,6 +31,19 @@
 
 ---
 
+## HTTP (v2 stateless)
+
+Default is **stdio**. Optional Streamable HTTP — no session id, JSON responses, loopback only:
+
+```bash
+npx -y apple-health-mcp-unofficial --http
+# GET  http://127.0.0.1:3000/health
+# POST http://127.0.0.1:3000/mcp   (sessionless)
+```
+
+Env: `APPLE_HEALTH_MCP_HOST`, `APPLE_HEALTH_MCP_PORT`, `APPLE_HEALTH_MCP_TRANSPORT=http`.
+
+
 <!-- /delx-wellness header v2 -->
 
 **Local-first MCP server that reads your Apple Health export and exposes it to AI agents.**
