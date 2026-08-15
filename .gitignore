@@ -8,3 +8,5 @@ dist/
 /apple_health_export/
 *.bak-apple-health-mcp-*
 .mcpregistry_*
+tokens.json
+config.json
