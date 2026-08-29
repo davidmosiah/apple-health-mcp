@@ -388,3 +388,13 @@ MIT — see [LICENSE](LICENSE).
 ## Disclaimer
 
 This software is provided as-is. It is not a medical device, does not provide medical advice, and should not be used for diagnosis, treatment or emergency monitoring. Always consult qualified professionals for medical concerns.
+
+## Skill or MCP
+
+Same package, two doors. MCP registers tools on stdio/HTTP. The [skill](skill/SKILL.md) can drive the **same** tools through the CLI when the client has no MCP:
+
+```bash
+npx -y apple-health-mcp-unofficial call apple_health_connection_status --json '{}'
+```
+
+Copy `skill/SKILL.md` into your agent skills dir.
