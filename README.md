@@ -36,7 +36,7 @@
 Default is **stdio**. Optional Streamable HTTP — no session id, JSON responses, loopback only:
 
 ```bash
-npx -y apple-health-mcp-unofficial --http
+npx -y apple-health-mcp-unofficial@0.8.0 --http
 # GET  http://127.0.0.1:3000/health
 # POST http://127.0.0.1:3000/mcp   (sessionless)
 ```
@@ -77,14 +77,14 @@ Wait a few minutes. AirDrop or transfer the zip to this machine.
 **2. Configure and verify:**
 
 ```bash
-npx -y apple-health-mcp-unofficial setup --export-path /path/to/export.zip
-npx -y apple-health-mcp-unofficial doctor
+npx -y apple-health-mcp-unofficial@0.8.0 setup --export-path /path/to/export.zip
+npx -y apple-health-mcp-unofficial@0.8.0 doctor
 ```
 
 Or let the CLI find the newest local export in `Downloads`, `Desktop` or `Documents`, copy it into managed local storage, and save that path:
 
 ```bash
-npx -y apple-health-mcp-unofficial setup --auto-import
+npx -y apple-health-mcp-unofficial@0.8.0 setup --auto-import
 ```
 
 Supported export paths:
@@ -97,7 +97,7 @@ Supported export paths:
 Apple Health is a manual export, so the usual pain is that your data goes stale the moment you stop re-running setup. Point the connector at a folder you drop new exports into:
 
 ```bash
-npx -y apple-health-mcp-unofficial setup --watch-path /path/to/health-exports
+npx -y apple-health-mcp-unofficial@0.8.0 setup --watch-path /path/to/health-exports
 ```
 
 Now every time you export from your iPhone and drop the new `export.zip` (or `export.xml`, or unzipped `apple_health_export/`) into that folder, the connector auto-promotes the newest one to be the active export — on server startup and live while it runs — and refreshes the cached summaries. You can also trigger a re-scan on demand with the `apple_health_reimport` tool. This is the cross-platform recurring-refresh path; a fully live HealthKit bridge still needs a native macOS/iOS component.
@@ -111,7 +111,7 @@ Then add this to your MCP client config:
   "mcpServers": {
     "apple_health": {
       "command": "npx",
-      "args": ["-y", "apple-health-mcp-unofficial"]
+      "args": ["-y", "apple-health-mcp-unofficial@0.8.0"]
     }
   }
 }
@@ -305,8 +305,8 @@ APPLE_HEALTH_WATCH_PATH=/path/to/health-exports # optional: auto-reimport the ne
 ## Hermes / remote setup
 
 ```bash
-npx -y apple-health-mcp-unofficial setup --client hermes --export-path /path/to/export.zip
-npx -y apple-health-mcp-unofficial doctor --client hermes
+npx -y apple-health-mcp-unofficial@0.8.0 setup --client hermes --export-path /path/to/export.zip
+npx -y apple-health-mcp-unofficial@0.8.0 doctor --client hermes
 hermes mcp test apple_health
 ```
 
@@ -394,7 +394,18 @@ This software is provided as-is. It is not a medical device, does not provide me
 Same package, two doors. MCP registers tools on stdio/HTTP. The [skill](skill/SKILL.md) can drive the **same** tools through the CLI when the client has no MCP:
 
 ```bash
-npx -y apple-health-mcp-unofficial call apple_health_connection_status --json '{}'
+npx -y apple-health-mcp-unofficial@0.8.0 call apple_health_connection_status --json '{}'
 ```
 
 Copy `skill/SKILL.md` into your agent skills dir.
+
+## 0.8.0 — candidate (2026-11-02)
+
+This is a release candidate, not evidence of an npm publication. Existing installations are not updated automatically.
+
+### Migration and security boundaries
+
+- HTTP transport accepts loopback only. LAN addresses and wildcard binds are rejected; use stdio or a local loopback client instead.
+- Wellness profiles are validated, limited to 256 KiB, and protected with a cooperative lock. Oversized or invalid existing profiles must be corrected before use. Symbolic links, including dangling links and legacy profile paths, are rejected. These checks do not guarantee safety against a hostile local filesystem or non-cooperating processes.
+- MCP inputs have a 10,000-element budget and HTTP bodies are limited to 1 MiB; compressed request bodies are rejected. Previously accepted oversized requests may now fail; reduce request sizes rather than disabling validation.
+- Dependency fixes are included. Upgrade explicitly after publication and restart the connector; old installations retain their previous behavior.

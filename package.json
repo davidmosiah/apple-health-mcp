@@ -1,6 +1,6 @@
 {
   "name": "apple-health-mcp-unofficial",
-  "version": "0.7.4",
+  "version": "0.8.0",
   "description": "Unofficial local-first MCP server for Apple Health export data.",
   "type": "module",
   "bin": {
@@ -24,7 +24,7 @@
     "start": "node dist/index.js",
     "dev": "tsx src/index.ts",
     "smoke": "node scripts/smoke-tools.mjs",
-    "test": "npm run typecheck && npm run build && npm run smoke && npm run test:export && npm run test:aggregate && npm run test:scan-cache && npm run test:freshness && npm run test:incremental-cache && npm run test:watch-folder && npm run smoke:http && npm run test:cli-ux && npm run test:agent-readiness && npm run test:hermes-agent && npm run test:metadata && npm run test:skill-surface && npm run test:input-limits && npm run test:profile-boundaries && npm run test:profile-storage && npm run test:http-local-only",
+    "test": "npm run typecheck && npm run build && npm run smoke && npm run test:export && npm run test:aggregate && npm run test:scan-cache && npm run test:freshness && npm run test:incremental-cache && npm run test:watch-folder && npm run smoke:http && npm run test:cli-ux && npm run test:agent-readiness && npm run test:hermes-agent && npm run test:metadata && npm run test:skill-surface && npm run test:input-limits && npm run test:profile-boundaries && npm run test:profile-storage && npm run test:http-local-only && npm run test:release-metadata",
     "test:export": "node scripts/export-parser-test.mjs",
     "test:aggregate": "node scripts/aggregate-truncation-test.mjs",
     "test:scan-cache": "node scripts/scan-cache-test.mjs",
@@ -41,7 +41,8 @@
     "test:input-limits": "node scripts/input-limits-test.mjs",
     "test:profile-boundaries": "node scripts/test-profile-boundaries.mjs",
     "test:profile-storage": "node scripts/test-profile-storage.mjs",
-    "test:http-local-only": "node scripts/test-http-local-only.mjs"
+    "test:http-local-only": "node scripts/test-http-local-only.mjs",
+    "test:release-metadata": "node scripts/test-release-metadata.mjs"
   },
   "keywords": [
     "mcp",

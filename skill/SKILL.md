@@ -14,7 +14,7 @@ Same binary either way. Do not duplicate the API client.
 **MCP** — tools appear natively after stdio/HTTP config:
 
 ```json
-{ "mcpServers": { "apple-health": { "command": "npx", "args": ["-y", "apple-health-mcp-unofficial"] } } }
+{ "mcpServers": { "apple-health": { "command": "npx", "args": ["-y", "apple-health-mcp-unofficial@0.8.0"] } } }
 ```
 
 Do not put mutation flags in that snippet.
@@ -22,7 +22,7 @@ Do not put mutation flags in that snippet.
 **Skill / CLI** — no MCP client required. Same tools:
 
 ```bash
-npx -y apple-health-mcp-unofficial call apple_health_connection_status --json '{}'
+npx -y apple-health-mcp-unofficial@0.8.0 call apple_health_connection_status --json '{}'
 ```
 
 If MCP tools named `apple_*` are already available, use them. Do not also shell out.

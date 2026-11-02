@@ -2,7 +2,7 @@
   "mcpServers": {
     "apple_health": {
       "command": "npx",
-      "args": ["-y", "apple-health-mcp-unofficial"]
+      "args": ["-y", "apple-health-mcp-unofficial@0.8.0"]
     }
   }
 }
