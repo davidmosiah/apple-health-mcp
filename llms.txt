@@ -18,4 +18,4 @@ MCP command: apple-health-mcp-server
 - Not medical advice. Use as trend context only — outputs are operational context, not medical, legal or financial advice.
 
 Skill (same gates, no MCP client required): skill/SKILL.md
-npx -y apple-health-mcp-unofficial call <tool> --json '{...}'
+npx -y apple-health-mcp-unofficial@0.8.0 call <tool> --json '{...}'

@@ -1,14 +1,14 @@
 # Hermes Example
 
 ```bash
-npx -y apple-health-mcp-unofficial setup --client hermes --export-path /path/to/export.zip
-npx -y apple-health-mcp-unofficial doctor --client hermes
+npx -y apple-health-mcp-unofficial@0.8.0 setup --client hermes --export-path /path/to/export.zip
+npx -y apple-health-mcp-unofficial@0.8.0 doctor --client hermes
 ```
 
 Or, after transferring the export to `Downloads`, `Desktop` or `Documents`:
 
 ```bash
-npx -y apple-health-mcp-unofficial setup --client hermes --auto-import
+npx -y apple-health-mcp-unofficial@0.8.0 setup --client hermes --auto-import
 ```
 
 Reload with `/reload-mcp` or:
