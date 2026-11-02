@@ -24,7 +24,7 @@
     "start": "node dist/index.js",
     "dev": "tsx src/index.ts",
     "smoke": "node scripts/smoke-tools.mjs",
-    "test": "npm run typecheck && npm run build && npm run smoke && npm run test:export && npm run test:aggregate && npm run test:scan-cache && npm run test:freshness && npm run test:incremental-cache && npm run test:watch-folder && npm run smoke:http && npm run test:cli-ux && npm run test:agent-readiness && npm run test:hermes-agent && npm run test:metadata && npm run test:skill-surface && npm run test:input-limits && npm run test:profile-boundaries && npm run test:profile-storage",
+    "test": "npm run typecheck && npm run build && npm run smoke && npm run test:export && npm run test:aggregate && npm run test:scan-cache && npm run test:freshness && npm run test:incremental-cache && npm run test:watch-folder && npm run smoke:http && npm run test:cli-ux && npm run test:agent-readiness && npm run test:hermes-agent && npm run test:metadata && npm run test:skill-surface && npm run test:input-limits && npm run test:profile-boundaries && npm run test:profile-storage && npm run test:http-local-only",
     "test:export": "node scripts/export-parser-test.mjs",
     "test:aggregate": "node scripts/aggregate-truncation-test.mjs",
     "test:scan-cache": "node scripts/scan-cache-test.mjs",
@@ -40,7 +40,8 @@
     "test:skill-surface": "node scripts/test-skill-surface.mjs",
     "test:input-limits": "node scripts/input-limits-test.mjs",
     "test:profile-boundaries": "node scripts/test-profile-boundaries.mjs",
-    "test:profile-storage": "node scripts/test-profile-storage.mjs"
+    "test:profile-storage": "node scripts/test-profile-storage.mjs",
+    "test:http-local-only": "node scripts/test-http-local-only.mjs"
   },
   "keywords": [
     "mcp",
